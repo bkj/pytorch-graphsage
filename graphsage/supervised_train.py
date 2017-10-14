@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-  supervised_train.py
+    supervised_train.py
 """
 
 from __future__ import division
@@ -312,7 +312,7 @@ def train(train_data, test_data=None):
     total_steps = 0
     avg_time = 0.0
     epoch_val_costs = []
-
+    
     train_adj_info = tf.assign(adj_info, minibatch.adj)
     val_adj_info = tf.assign(adj_info, minibatch.test_adj)
     for epoch in range(FLAGS.epochs): 
@@ -339,6 +339,7 @@ def train(train_data, test_data=None):
                     val_cost, val_f1_mic, val_f1_mac, duration = incremental_evaluate(sess, model, minibatch, FLAGS.batch_size)
                 else:
                     val_cost, val_f1_mic, val_f1_mac, duration = evaluate(sess, model, minibatch, FLAGS.validate_batch_size)
+                
                 sess.run(train_adj_info.op)
                 epoch_val_costs[-1] += val_cost
                 
