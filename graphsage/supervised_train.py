@@ -65,6 +65,14 @@ flags.DEFINE_integer('gpu', 1, "which gpu to use.")
 flags.DEFINE_integer('print_every', 5, "How often to print training info.")
 flags.DEFINE_integer('max_total_steps', 10**10, "Maximum total number of iterations")
 
+all_models = [
+    'graphsage_mean',
+    'gcn',
+    'graphsage_seq',
+    'graphsage_maxpool',
+    'graphsage_meanpool',
+]
+
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
 
 GPU_MEM_FRACTION = 0.8
@@ -286,10 +294,6 @@ def train(train_data, test_data=None):
             
             aggregator_type="meanpool",
         )
-        
-    else:
-        raise Exception('Error: model name unrecognized.')
-    
     
     config = tf.ConfigProto(log_device_placement=FLAGS.log_device_placement)
     config.gpu_options.allow_growth = True
@@ -382,6 +386,8 @@ def train(train_data, test_data=None):
 
 
 def main(argv=None):
+    assert FLAGS.model in all_models, 'Error: model name unrecognized.'
+    
     print("Loading training data..")
     train_data = load_data(FLAGS.train_prefix)
     print("Done loading training data..")
