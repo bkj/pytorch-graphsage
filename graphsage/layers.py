@@ -32,7 +32,6 @@ class Layer(object):
             name = layer + '_' + str(get_layer_uid(layer))
         
         self.name = name
-        
         self.vars = {}
         
     def __call__(self, inputs):
@@ -64,7 +63,7 @@ class Dense(Layer):
             
             if self.bias:
                 self.vars['bias'] = zeros([output_dim], name='bias')
-
+                
     def _call(self, x):
         x = tf.nn.dropout(x, 1 - self.dropout)
         output = tf.matmul(x, self.vars['weights'])

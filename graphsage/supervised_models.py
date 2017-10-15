@@ -156,6 +156,8 @@ class SupervisedGraphsage(Model):
             self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                     logits=self.node_preds,
                     labels=self.placeholders['labels']))
+            
+        tf.summary.scalar('loss', self.loss)
         
         # --
         # Gradients

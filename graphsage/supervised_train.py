@@ -32,9 +32,9 @@ class UniformNeighborSampler(object):
         return tf.slice(adj_lists, [0,0], [-1, num_samples])
 
 
-def evaluate(sess, model, minibatch, placeholders, test=False):
+def evaluate(sess, model, minibatch, placeholders, mode):
     preds, labels = [], []
-    for eval_batch in minibatch.eval_batch_iterator(test=test):
+    for eval_batch in minibatch.iterate(mode=mode, shuffle=False):
         preds.append(sess.run(model.preds, feed_dict={
             placeholders['batch'] : eval_batch['batch'],
             placeholders['batch_size'] : eval_batch['batch_size'],
@@ -211,20 +211,20 @@ if __name__ == "__main__":
     config.gpu_options.allow_growth = True
     config.allow_soft_placement = True
     sess = tf.Session(config=config)
-    merged = tf.summary.merge_all()
     sess.run(tf.global_variables_initializer())
     
     load_train_adj = tf.assign(adj_, minibatch.train_adj)
     load_val_adj = tf.assign(adj_, minibatch.val_adj)
     
-    # Train model
-    total_steps = 0
+    # --
+    # Train 
     
+    total_steps = 0
     for epoch in range(FLAGS.epochs): 
-        for iter_, train_batch in enumerate(minibatch.train_batch_iterator()):
+        for iter_, train_batch in enumerate(minibatch.iterate(mode='train', shuffle=True)):
             
             # Training step
-            _, _, _, train_preds = sess.run([merged, model.opt_op, model.loss, model.preds], feed_dict={
+            _, _, train_preds = sess.run([model.opt_op, model.loss, model.preds], feed_dict={
                 placeholders['batch'] : train_batch['batch'],
                 placeholders['batch_size'] : train_batch['batch_size'],
                 placeholders['labels'] : train_batch['labels'],
@@ -233,7 +233,7 @@ if __name__ == "__main__":
             
             if iter_ % FLAGS.validate_iter == 0:
                 sess.run(load_val_adj.op)
-                val_batch = minibatch.get_eval_batch(size=FLAGS.validate_batch_size, test=False)
+                val_batch = minibatch.get_eval_batch(size=FLAGS.validate_batch_size, mode='val')
                 val_f1 = calc_f1(val_batch['labels'], sess.run(model.preds, feed_dict={
                     placeholders['batch'] : val_batch['batch'],
                     placeholders['batch_size'] : val_batch['batch_size'],
@@ -254,7 +254,6 @@ if __name__ == "__main__":
     
     # --
     # Eval
-    
     sess.run(load_val_adj.op)
-    print({"val_f1" : evaluate(sess, model, minibatch, placeholders, test=False)})
-    print({"test_f1" : evaluate(sess, model, minibatch, placeholders, test=True)})
+    print({"val_f1" : evaluate(sess, model, minibatch, placeholders, mode='test')})
+    print({"test_f1" : evaluate(sess, model, minibatch, placeholders, mode='val')})
