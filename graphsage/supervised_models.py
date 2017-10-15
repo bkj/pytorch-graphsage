@@ -27,14 +27,12 @@ SAGEInfo = namedtuple("SAGEInfo", [
 ])
 
 class SupervisedGraphsage(object):
-    def __init__(self, num_classes,
-            placeholders, features, adj, degrees,
+    def __init__(self, num_classes, placeholders, features, adj, degrees,
             layer_infos, learning_rate, weight_decay, concat=True, aggregator_type="mean", 
             model_size="small", sigmoid=False, identity_dim=0, **kwargs):
         
         name = self.__class__.__name__.lower()
         self.name = name
-        
         
         self.aggregator   = aggs[aggregator_type]
         self.batch_size   = placeholders["batch_size"]

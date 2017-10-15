@@ -111,13 +111,65 @@ all_models = [
     'graphsage_meanpool',
 ]
 
+
+def select_model(model, sampler):
+    if model == 'graphsage_mean':
+        return {
+            "layer_infos" : filter(None, [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2) if FLAGS.samples_2 != 0 else None,
+                SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2) if FLAGS.samples_3 != 0 else None,
+            ]),
+        }
+        
+    elif model == 'gcn':
+        return {
+            "aggregator_type" : "gcn",
+            "concat" : False,
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, 2 * FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, 2 * FLAGS.dim_2)
+            ],
+        }
+        
+    elif model == 'graphsage_seq':
+        return {
+            "aggregator_type" : "seq",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        }
+        
+    elif model == 'graphsage_maxpool':
+        return {
+            "aggregator_type" : "pool",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        }
+        
+    elif model == 'graphsage_meanpool':
+        return {
+            "aggregator_type" : "meanpool",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        }
+
+
 if __name__ == "__main__":
     
     set_seeds(456)
     
     assert FLAGS.model in all_models, 'Error: model name unrecognized.'
     
-    G, features, id2idx, context_pairs, class_map = load_data(FLAGS.train_prefix)
+    # --
+    # IO
+    
+    G, features, id2idx, _, class_map = load_data(FLAGS.train_prefix)
     
     if isinstance(list(class_map.values())[0], list):
         num_classes = len(list(class_map.values())[0])
@@ -128,97 +180,53 @@ if __name__ == "__main__":
     if features is not None:
         features = np.vstack([features, np.zeros((features.shape[1],))])
     
+    # --
+    # Define model + sampler
+    
+    batch_iterator = NodeMinibatchIterator(
+        G=G,
+        id2idx=id2idx,
+        class_map=class_map,
+        num_classes=num_classes,
+        batch_size=FLAGS.batch_size,
+        max_degree=FLAGS.max_degree,
+    )
+    
+    adj_ = tf.Variable(tf.constant(batch_iterator.train_adj, dtype=tf.int32), trainable=False, name="adj_")
+    
     placeholders = {
         'labels'     : tf.placeholder(tf.float32, shape=(None, num_classes), name='labels'),
-        'batch'      : tf.placeholder(tf.int32, shape=(None), name='batch1'),
+        'batch'      : tf.placeholder(tf.int32, shape=(None), name='batch'),
         'dropout'    : tf.placeholder_with_default(0., shape=(), name='dropout'),
         'batch_size' : tf.placeholder(tf.int32, name='batch_size'),
     }
-    
-    minibatch = NodeMinibatchIterator(
-        G,
-        id2idx,
-        class_map,
-        num_classes,
-        batch_size=FLAGS.batch_size,
-        max_degree=FLAGS.max_degree,
-        context_pairs=context_pairs
-    )
-    
-    adj_ = tf.Variable(tf.constant(minibatch.train_adj, dtype=tf.int32), trainable=False, name="adj_")
     
     params = {
         "num_classes"   : num_classes,
         "placeholders"  : placeholders,
         "features"      : features,
         "adj"           : adj_,
-        "degrees"       : minibatch.degrees,
+        "degrees"       : batch_iterator.degrees,
         "model_size"    : FLAGS.model_size,
         "sigmoid"       : FLAGS.sigmoid,
         "identity_dim"  : FLAGS.identity_dim,
-        "logging"       : True,
         "learning_rate" : FLAGS.learning_rate,
         "weight_decay"  : FLAGS.weight_decay,
     }
-    
-    sampler = UniformNeighborSampler(adj_)
-    if FLAGS.model == 'graphsage_mean':
-        params.update({
-            "layer_infos" : filter(None, [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2) if FLAGS.samples_2 != 0 else None,
-                SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2) if FLAGS.samples_3 != 0 else None,
-            ]),
-        })
-        
-    elif FLAGS.model == 'gcn':
-        params.update({
-            "aggregator_type" : "gcn",
-            "concat" : False,
-            "layer_infos" : [
-                SAGEInfo("node", sampler, FLAGS.samples_1, 2 * FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, 2 * FLAGS.dim_2)
-            ],
-        })
-        
-    elif FLAGS.model == 'graphsage_seq':
-        params.update({
-            "aggregator_type" : "seq",
-            "layer_infos" : [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-            ],
-        })
-        
-    elif FLAGS.model == 'graphsage_maxpool':
-        params.update({
-            "aggregator_type" : "pool",
-            "layer_infos" : [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-            ],
-        })
-        
-    elif FLAGS.model == 'graphsage_meanpool':
-        params.update({
-            "aggregator_type" : "meanpool",
-            "layer_infos" : [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-            ],
-        })
-    
+    params.update(select_model(FLAGS.model, UniformNeighborSampler(adj_)))
     model = SupervisedGraphsage(**params)
     
-    # Initialize session
+    # --
+    # TF stuff
+    
     config = tf.ConfigProto(log_device_placement=FLAGS.log_device_placement)
     config.gpu_options.allow_growth = True
     config.allow_soft_placement = True
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
     
-    load_train_adj = tf.assign(adj_, minibatch.train_adj)
-    load_val_adj = tf.assign(adj_, minibatch.val_adj)
+    load_train_adj = tf.assign(adj_, batch_iterator.train_adj)
+    load_val_adj = tf.assign(adj_, batch_iterator.val_adj)
     
     # --
     # Train 
@@ -227,7 +235,7 @@ if __name__ == "__main__":
     
     total_steps = 0
     for epoch in range(FLAGS.epochs): 
-        for iter_, train_batch in enumerate(minibatch.iterate(mode='train', shuffle=True)):
+        for iter_, train_batch in enumerate(batch_iterator.iterate(mode='train', shuffle=True)):
             
             # Training step
             _, _, train_preds = sess.run([model.opt_op, model.loss, model.preds], feed_dict={
@@ -237,9 +245,10 @@ if __name__ == "__main__":
                 placeholders['dropout'] : FLAGS.dropout
             })
             
+            # Validation performance
             if iter_ % FLAGS.validate_iter == 0:
                 sess.run(load_val_adj.op)
-                val_batch = minibatch.get_eval_batch(size=FLAGS.validate_batch_size, mode='val')
+                val_batch = batch_iterator.sample_eval_batch(size=FLAGS.validate_batch_size, mode='val')
                 val_f1 = calc_f1(val_batch['labels'], sess.run(model.preds, feed_dict={
                     placeholders['batch'] : val_batch['batch'],
                     placeholders['batch_size'] : val_batch['batch_size'],
@@ -247,6 +256,7 @@ if __name__ == "__main__":
                 }))
                 sess.run(load_train_adj.op)
             
+            # Logging
             if total_steps % FLAGS.print_every == 0:
                 train_f1 = calc_f1(train_batch['labels'], train_preds)
                 print({
@@ -260,6 +270,7 @@ if __name__ == "__main__":
     
     # --
     # Eval
+    
     sess.run(load_val_adj.op)
-    print({"val_f1" : evaluate(sess, model, minibatch, placeholders, mode='test')})
-    print({"test_f1" : evaluate(sess, model, minibatch, placeholders, mode='val')})
+    print({"val_f1" : evaluate(sess, model, batch_iterator, placeholders, mode='test')})
+    print({"test_f1" : evaluate(sess, model, batch_iterator, placeholders, mode='val')})

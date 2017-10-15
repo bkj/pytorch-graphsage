@@ -10,13 +10,13 @@ from __future__ import print_function
 import numpy as np
 
 class NodeMinibatchIterator(object):
-    def __init__(self, G, id2idx, label_map, num_classes, batch_size=100, max_degree=25, **kwargs):
+    def __init__(self, G, id2idx, class_map, num_classes, batch_size=100, max_degree=25, **kwargs):
         
         self.G            = G
         self.id2idx       = id2idx
         self.batch_size   = batch_size
         self.max_degree   = max_degree
-        self.label_map    = label_map
+        self.class_map    = class_map
         self.num_classes  = num_classes
         
         self.train_adj, self.degrees = self.construct_adj(train=True)
@@ -65,14 +65,14 @@ class NodeMinibatchIterator(object):
         return adj, degrees
     
     def _make_label_vec(self, node):
-        label = self.label_map[node]
+        label = self.class_map[node]
         if isinstance(label, list):
             # Sparse categorical
             return np.array(label)
         else:
             # One hot
             label_vec = np.zeros((self.num_classes))
-            class_ind = self.label_map[node]
+            class_ind = self.class_map[node]
             label_vec[class_ind] = 1
             return label_vec
     
@@ -83,7 +83,7 @@ class NodeMinibatchIterator(object):
             'labels' : np.vstack([self._make_label_vec(node) for node in batch_nodes])
         }
         
-    def get_eval_batch(self, size=None, mode='val'):
+    def sample_eval_batch(self, size=None, mode='val'):
         nodes = self.nodes[mode]
         nodes = nodes if size is None else np.random.choice(nodes, size, replace=True)
         return self.batch_feed_dict(nodes)
