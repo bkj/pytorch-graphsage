@@ -146,15 +146,17 @@ if __name__ == "__main__":
     adj_ = tf.Variable(tf.constant(minibatch.train_adj, dtype=tf.int32), trainable=False, name="adj_")
     
     params = {
-        "num_classes"  : num_classes,
-        "placeholders" : placeholders,
-        "features"     : features,
-        "adj"          : adj_,
-        "degrees"      : minibatch.degrees,
-        "model_size"   : FLAGS.model_size,
-        "sigmoid"      : FLAGS.sigmoid,
-        "identity_dim" : FLAGS.identity_dim,
-        "logging"      : True,
+        "num_classes"   : num_classes,
+        "placeholders"  : placeholders,
+        "features"      : features,
+        "adj"           : adj_,
+        "degrees"       : minibatch.degrees,
+        "model_size"    : FLAGS.model_size,
+        "sigmoid"       : FLAGS.sigmoid,
+        "identity_dim"  : FLAGS.identity_dim,
+        "logging"       : True,
+        "learning_rate" : FLAGS.learning_rate,
+        "weight_decay"  : FLAGS.weight_decay,
     }
     
     sampler = UniformNeighborSampler(adj_)

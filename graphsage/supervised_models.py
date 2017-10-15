@@ -11,9 +11,6 @@ from graphsage.layers import Dense
 from graphsage.aggregators import MeanAggregator, MaxPoolingAggregator, \
     MeanPoolingAggregator, SeqAggregator, GCNAggregator
 
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-
 aggs = {
     "mean" : MeanAggregator,
     "seq" : SeqAggregator,
@@ -44,95 +41,66 @@ class Model(object):
         self.logging = kwargs.get('logging', False)
         
         self.vars = {}
-        self.placeholders = {}
-        
-        self.layers = []
-        self.activations = []
-        
-        self.inputs = None
-        self.outputs = None
-        
-        self.loss = 0
-        self.accuracy = 0
-        self.optimizer = None
-        self.opt_op = None
+
 
 
 class SupervisedGraphsage(Model):
     def __init__(self, num_classes,
             placeholders, features, adj, degrees,
-            layer_infos, concat=True, aggregator_type="mean", 
+            layer_infos, learning_rate, weight_decay, concat=True, aggregator_type="mean", 
             model_size="small", sigmoid=False, identity_dim=0, **kwargs):
-        '''
-        Args:
-            - placeholders: Stanford TensorFlow placeholder object.
-            - features: Numpy array with node features.
-            - adj: Numpy array with adjacency lists (padded with random re-samples)
-            - degrees: Numpy array with node degrees. 
-            - layer_infos: List of SAGEInfo namedtuples that describe the parameters of all the recursive layers. See SAGEInfo definition above.
-            - concat: whether to concatenate during recursive iterations
-            - aggregator_type: how to aggregate neighbor information
-            - model_size: one of "small" and "big"
-            - sigmoid: Set to true if nodes can belong to multiple classes
-        '''
         
         super(SupervisedGraphsage, self).__init__(**kwargs)
         
-        self.aggregator = aggs[aggregator_type]
-        self.inputs1    = placeholders["batch"]
-        self.model_size = model_size
-        self.adj_info   = adj
-        
-        self.embeds = None
-        if identity_dim > 0:
-           self.embeds = tf.get_variable("node_embeddings", [adj.get_shape().as_list()[0], identity_dim])
-        
-        if features is None: 
-            if identity_dim == 0:
-                raise Exception("Must have a positive value for identity feature dimension if no input features given.")
-            
-            self.features = self.embeds
-        else:
-            self.features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
-            if not self.embeds is None:
-                self.features = tf.concat([self.embeds, self.features], axis=1)
-        
-        self.degrees      = degrees
-        self.concat       = concat
+        self.aggregator   = aggs[aggregator_type]
         self.batch_size   = placeholders["batch_size"]
-        self.placeholders = placeholders
+        self.dropout      = placeholders["dropout"]
         self.layer_infos  = layer_infos
         
         dims = [(0 if features is None else features.shape[1]) + identity_dim]
         dims.extend([layer_infos[i].output_dim for i in range(len(layer_infos))])
         
+        node_embeddings = None
+        if identity_dim > 0:
+           node_embeddings = tf.get_variable("node_embeddings", [adj.get_shape().as_list()[0], identity_dim])
+        
+        if features is None: 
+            if identity_dim == 0:
+                raise Exception("Must have a positive value for identity feature dimension if no input features given.")
+            
+            features = node_embeddings
+        else:
+            features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
+            if not node_embeddings is None:
+                features = tf.concat([node_embeddings, features], axis=1)
+        
         # Optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
         
         # Sample
-        samples1, support_sizes1 = self.sample(self.inputs1, self.layer_infos)
+        samples1, support_sizes1 = self.sample(placeholders["batch"], self.layer_infos)
         
         # Aggregate
         self.outputs1, self.aggregators = self.aggregate(
             samples=samples1, 
-            input_features=[self.features],
+            input_features=[features],
             dims=dims,
             num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
             support_sizes=support_sizes1,
-            concat=self.concat,
-            model_size=self.model_size
+            concat=concat,
+            model_size=model_size
         )
         
         # Normalize
         self.outputs1 = tf.nn.l2_normalize(self.outputs1, 1)
         
         # Predict
-        dim_mult = 2 if self.concat else 1
+        dim_mult = 2 if concat else 1
         self.node_pred = Dense(
             dim_mult * dims[-1],
             num_classes,
-            dropout=self.placeholders['dropout'],
-            act=lambda x : x
+            dropout=self.dropout,
+            act=lambda x : x,
         )
         self.node_preds = self.node_pred(self.outputs1)
         
@@ -140,22 +108,23 @@ class SupervisedGraphsage(Model):
         # Define loss
         
         # regularization
+        self.loss = 0
         for aggregator in self.aggregators:
             for var in aggregator.vars.values():
-                self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+                self.loss += weight_decay * tf.nn.l2_loss(var)
         
         for var in self.node_pred.vars.values():
-            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+            self.loss += weight_decay * tf.nn.l2_loss(var)
        
         # classification
         if sigmoid:
             self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.node_preds,
-                    labels=self.placeholders['labels']))
+                    labels=placeholders['labels']))
         else:
             self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                     logits=self.node_preds,
-                    labels=self.placeholders['labels']))
+                    labels=placeholders['labels']))
             
         tf.summary.scalar('loss', self.loss)
         
@@ -191,25 +160,7 @@ class SupervisedGraphsage(Model):
     
     def aggregate(self, samples, input_features, dims, num_samples, support_sizes,
             name=None, concat=False, model_size="small"):
-        """ 
         
-        At each layer, aggregate hidden representations of neighbors to compute the hidden representations  at next layer.
-        
-        Args:
-            samples: a list of samples of variable hops away for convolving at each layer of the
-                network. Length is the number of layers + 1. Each is a vector of node indices.
-            input_features: the input features for each sample of various hops away.
-            dims: a list of dimensions of the hidden representations from the input layer to the
-                final layer. Length is the number of layers + 1.
-            num_samples: list of number of samples for each layer.
-            support_sizes: the number of nodes to gather information from for each layer.
-            batch_size: the number of inputs (different for batch inputs and negative samples).
-        
-        Returns:
-            The hidden representation at the final layer for all nodes in batch
-        """
-         
-        # length: number of layers + 1
         hidden = [tf.nn.embedding_lookup(input_features, node_samples) for node_samples in samples]
         
         aggregators = []
@@ -225,7 +176,7 @@ class SupervisedGraphsage(Model):
                 dim_mult * dims[layer],
                 dims[layer+1],
                 act=act,
-                dropout=self.placeholders['dropout'],
+                dropout=self.dropout,
                 name=name,
                 concat=concat,
                 model_size=model_size,
