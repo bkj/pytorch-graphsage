@@ -15,18 +15,18 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 aggs = {
-    "mean": MeanAggregator,
-    "seq": SeqAggregator,
-    "meanpool": MeanPoolingAggregator,
-    "maxpool": MaxPoolingAggregator,
-    "gcn": GCNAggregator,
+    "mean" : MeanAggregator,
+    "seq" : SeqAggregator,
+    "meanpool" : MeanPoolingAggregator,
+    "maxpool" : MaxPoolingAggregator,
+    "gcn" : GCNAggregator,
 }
 
 SAGEInfo = namedtuple("SAGEInfo", [
-    'layer_name', # name of the layer (to get feature embedding etc.)
-    'neigh_sampler', # callable neigh_sampler constructor
+    'layer_name',
+    'neib_sampler',
     'num_samples',
-    'output_dim' # the output (i.e., hidden) dimension
+    'output_dim',
 ])
 
 class Model(object):
@@ -62,7 +62,7 @@ class SupervisedGraphsage(Model):
     def __init__(self, num_classes,
             placeholders, features, adj, degrees,
             layer_infos, concat=True, aggregator_type="mean", 
-            model_size="small", sigmoid_loss=False, identity_dim=0, **kwargs):
+            model_size="small", sigmoid=False, identity_dim=0, **kwargs):
         '''
         Args:
             - placeholders: Stanford TensorFlow placeholder object.
@@ -73,7 +73,7 @@ class SupervisedGraphsage(Model):
             - concat: whether to concatenate during recursive iterations
             - aggregator_type: how to aggregate neighbor information
             - model_size: one of "small" and "big"
-            - sigmoid_loss: Set to true if nodes can belong to multiple classes
+            - sigmoid: Set to true if nodes can belong to multiple classes
         '''
         
         super(SupervisedGraphsage, self).__init__(**kwargs)
@@ -139,6 +139,7 @@ class SupervisedGraphsage(Model):
         # --
         # Define loss
         
+        # regularization
         for aggregator in self.aggregators:
             for var in aggregator.vars.values():
                 self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
@@ -146,8 +147,8 @@ class SupervisedGraphsage(Model):
         for var in self.node_pred.vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
        
-        # classification loss
-        if sigmoid_loss:
+        # classification
+        if sigmoid:
             self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.node_preds,
                     labels=self.placeholders['labels']))
@@ -155,8 +156,6 @@ class SupervisedGraphsage(Model):
             self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                     logits=self.node_preds,
                     labels=self.placeholders['labels']))
-            
-        tf.summary.scalar('loss', self.loss)
         
         # --
         # Gradients
@@ -169,7 +168,7 @@ class SupervisedGraphsage(Model):
         # --
         # Predictions
         
-        if sigmoid_loss:
+        if sigmoid:
             self.preds = tf.nn.sigmoid(self.node_preds)
         else:
             self.preds = tf.nn.softmax(self.node_preds)
@@ -182,13 +181,13 @@ class SupervisedGraphsage(Model):
         for k in range(len(layer_infos)):
             t = len(layer_infos) - k - 1
             support_size *= layer_infos[t].num_samples
-            node = layer_infos[t].neigh_sampler((samples[k], layer_infos[t].num_samples))
+            node = layer_infos[t].neib_sampler((samples[k], layer_infos[t].num_samples))
             samples.append(tf.reshape(node, [support_size * self.batch_size,]))
             support_sizes.append(support_size)
         
         return samples, support_sizes
     
-    def aggregate(self, samples, input_features, dims, num_samples, support_sizes, batch_size=None,
+    def aggregate(self, samples, input_features, dims, num_samples, support_sizes,
             name=None, concat=False, model_size="small"):
         """ 
         
@@ -207,37 +206,39 @@ class SupervisedGraphsage(Model):
         Returns:
             The hidden representation at the final layer for all nodes in batch
         """
-        
-        batch_size = batch_size if batch_size else self.batch_size
-            
+         
         # length: number of layers + 1
         hidden = [tf.nn.embedding_lookup(input_features, node_samples) for node_samples in samples]
         
         aggregators = []
         for layer in range(len(num_samples)):
-            dim_mult = 2 if concat and (layer != 0) else 1
-            # aggregator at current layer
             if layer == len(num_samples) - 1:
-                aggregator = self.aggregator(dim_mult*dims[layer], dims[layer+1], act=lambda x : x,
-                        dropout=self.placeholders['dropout'], 
-                        name=name, concat=concat, model_size=model_size)
+                act = lambda x: x
             else:
-                aggregator = self.aggregator(dim_mult*dims[layer], dims[layer+1],
-                        dropout=self.placeholders['dropout'], 
-                        name=name, concat=concat, model_size=model_size)
+                act = tf.nn.relu
+            
+            dim_mult = 2 if concat and (layer != 0) else 1
+            
+            aggregator = self.aggregator(
+                dim_mult * dims[layer],
+                dims[layer+1],
+                act=act,
+                dropout=self.placeholders['dropout'],
+                name=name,
+                concat=concat,
+                model_size=model_size,
+            )
+            
             aggregators.append(aggregator)
             
-            # hidden representation at current layer for all support nodes that are various hops away
-            
             next_hidden = []
-            # as layer increases, the number of support nodes needed decreases
             for hop in range(len(num_samples) - layer):
-                dim_mult = 2 if concat and (layer != 0) else 1
-                neigh_dims = [batch_size * support_sizes[hop], 
-                              num_samples[len(num_samples) - hop - 1], 
-                              dim_mult*dims[layer]]
-                h = aggregator((hidden[hop], tf.reshape(hidden[hop + 1], neigh_dims)))
-                next_hidden.append(h)
+                neib_dims = [
+                    self.batch_size * support_sizes[hop],
+                    num_samples[len(num_samples) - hop - 1],
+                    dim_mult * dims[layer]
+                ]
+                next_hidden.append(aggregator((hidden[hop], tf.reshape(hidden[hop + 1], neib_dims))))
             
             hidden = next_hidden
         

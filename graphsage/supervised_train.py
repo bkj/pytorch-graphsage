@@ -22,15 +22,27 @@ from graphsage.supervised_models import SupervisedGraphsage, SAGEInfo
 # Helpers
 
 class UniformNeighborSampler(object):
-    def __init__(self, adj_info, **kwargs):
-        self.adj_info = adj_info
+    def __init__(self, adj, **kwargs):
+        self.adj = adj
         
     def __call__(self, inputs):
         ids, num_samples = inputs
-        adj_lists = tf.nn.embedding_lookup(self.adj_info, ids)
+        adj_lists = tf.nn.embedding_lookup(self.adj, ids)
         adj_lists = tf.transpose(tf.random_shuffle(tf.transpose(adj_lists)))
         return tf.slice(adj_lists, [0,0], [-1, num_samples])
 
+
+def evaluate(sess, model, minibatch, placeholders, test=False):
+    preds, labels = [], []
+    for eval_batch in minibatch.eval_batch_iterator(test=test):
+        preds.append(sess.run(model.preds, feed_dict={
+            placeholders['batch'] : eval_batch['batch'],
+            placeholders['batch_size'] : eval_batch['batch_size'],
+            placeholders['labels'] : eval_batch['labels'],
+        }))
+        labels.append(eval_batch['labels'])
+    
+    return calc_f1(np.vstack(labels), np.vstack(preds))
 
 # --
 # Params
@@ -69,7 +81,6 @@ flags.DEFINE_boolean('sigmoid', False, 'whether to use sigmoid loss')
 flags.DEFINE_integer('identity_dim', 0, 'Set to positive value to use identity embedding features of that dimension. Default 0.')
 
 #logging, saving, validation settings etc.
-flags.DEFINE_string('base_log_dir', '.', 'base directory for logging and saving embeddings')
 flags.DEFINE_integer('validate_iter', 5000, "how often to run a validation minibatch.")
 flags.DEFINE_integer('validate_batch_size', 256, "how many nodes per validation sample.")
 flags.DEFINE_integer('gpu', 1, "which gpu to use.")
@@ -92,34 +103,19 @@ def calc_f1(y_true, y_pred):
         y_true = np.argmax(y_true, axis=1)
         y_pred = np.argmax(y_pred, axis=1)
     else:
-        y_pred[y_pred > 0.5] = 1
-        y_pred[y_pred <= 0.5] = 0
+        y_pred = y_pred.round().astype(int)
     
-    return metrics.f1_score(y_true, y_pred, average="micro"), metrics.f1_score(y_true, y_pred, average="macro")
-
-def log_dir():
-    log_dir = FLAGS.base_log_dir + "/sup-" + FLAGS.train_prefix.split("/")[-2]
-    log_dir += "/{model:s}_{model_size:s}_{lr:0.4f}/".format(
-        model=FLAGS.model,
-        model_size=FLAGS.model_size,
-        lr=FLAGS.learning_rate
-    )
-    
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    return log_dir
+    return {
+        "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+        "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+    }
 
 
-def train(train_data, test_data=None):
+if __name__ == "__main__":
     
-    total_steps   = 0
+    assert FLAGS.model in all_models, 'Error: model name unrecognized.'
     
-    G             = train_data[0]
-    features      = train_data[1]
-    id_map        = train_data[2]
-    context_pairs = train_data[3]
-    class_map     = train_data[4]
+    G, features, id2idx, context_pairs, class_map = load_data(FLAGS.train_prefix)
     
     if isinstance(list(class_map.values())[0], list):
         num_classes = len(list(class_map.values())[0])
@@ -139,123 +135,76 @@ def train(train_data, test_data=None):
     
     minibatch = NodeMinibatchIterator(
         G,
-        id_map,
-        placeholders,
+        id2idx,
         class_map,
         num_classes,
         batch_size=FLAGS.batch_size,
-        max_degree=FLAGS.max_degree, 
+        max_degree=FLAGS.max_degree,
         context_pairs=context_pairs
     )
     
-    adj_info = tf.Variable(tf.constant(minibatch.adj, dtype=tf.int32), trainable=False, name="adj_info")
+    adj_ = tf.Variable(tf.constant(minibatch.train_adj, dtype=tf.int32), trainable=False, name="adj_")
     
-    sampler = UniformNeighborSampler(adj_info)
+    params = {
+        "num_classes"  : num_classes,
+        "placeholders" : placeholders,
+        "features"     : features,
+        "adj"          : adj_,
+        "degrees"      : minibatch.degrees,
+        "model_size"   : FLAGS.model_size,
+        "sigmoid"      : FLAGS.sigmoid,
+        "identity_dim" : FLAGS.identity_dim,
+        "logging"      : True,
+    }
     
+    sampler = UniformNeighborSampler(adj_)
     if FLAGS.model == 'graphsage_mean':
-        layer_infos = filter(None, [
-            SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-            SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2) if FLAGS.samples_2 != 0 else None,
-            SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2) if FLAGS.samples_3 != 0 else None,
-        ])
+        params.update({
+            "layer_infos" : filter(None, [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2) if FLAGS.samples_2 != 0 else None,
+                SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2) if FLAGS.samples_3 != 0 else None,
+            ]),
+        })
         
-        model = SupervisedGraphsage(
-            num_classes,
-            placeholders,
-            features,
-            adj_info,
-            minibatch.deg,
-            layer_infos=layer_infos,
-            model_size=FLAGS.model_size,
-            sigmoid_loss=FLAGS.sigmoid,
-            identity_dim=FLAGS.identity_dim,
-            logging=True,
-        )
-    
     elif FLAGS.model == 'gcn':
-        layer_infos = [
-            SAGEInfo("node", sampler, FLAGS.samples_1, 2 * FLAGS.dim_1),
-            SAGEInfo("node", sampler, FLAGS.samples_2, 2 * FLAGS.dim_2)
-        ]
+        params.update({
+            "aggregator_type" : "gcn",
+            "concat" : False,
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, 2 * FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, 2 * FLAGS.dim_2)
+            ],
+        })
         
-        model = SupervisedGraphsage(
-            num_classes,
-            placeholders,
-            features,
-            adj_info,
-            minibatch.deg,
-            layer_infos=layer_infos,
-            model_size=FLAGS.model_size,
-            sigmoid_loss=FLAGS.sigmoid,
-            identity_dim=FLAGS.identity_dim,
-            logging=True,
-            
-            concat=False,
-            aggregator_type="gcn",
-        )
-
     elif FLAGS.model == 'graphsage_seq':
-        layer_infos = [
-            SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-            SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-        ]
+        params.update({
+            "aggregator_type" : "seq",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        })
         
-        model = SupervisedGraphsage(
-            num_classes,
-            placeholders,
-            features,
-            adj_info,
-            minibatch.deg,
-            layer_infos=layer_infos,
-            model_size=FLAGS.model_size,
-            sigmoid_loss=FLAGS.sigmoid,
-            identity_dim=FLAGS.identity_dim,
-            logging=True,
-            
-            aggregator_type="seq",
-        )
-
     elif FLAGS.model == 'graphsage_maxpool':
-        layer_infos = [
-            SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-            SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-        ]
+        params.update({
+            "aggregator_type" : "pool",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        })
         
-        model = SupervisedGraphsage(
-            num_classes,
-            placeholders,
-            features,
-            adj_info,
-            minibatch.deg,
-            layer_infos=layer_infos,
-            model_size=FLAGS.model_size,
-            sigmoid_loss=FLAGS.sigmoid,
-            identity_dim=FLAGS.identity_dim,
-            logging=True,
-            
-            aggregator_type="pool",
-        )
-
     elif FLAGS.model == 'graphsage_meanpool':
-        layer_infos = [
-            SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-            SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-        ]
-        
-        model = SupervisedGraphsage(
-            num_classes,
-            placeholders,
-            features,
-            adj_info,
-            minibatch.deg,
-            layer_infos=layer_infos,
-            model_size=FLAGS.model_size,
-            sigmoid_loss=FLAGS.sigmoid,
-            identity_dim=FLAGS.identity_dim,
-            logging=True,
-            
-            aggregator_type="meanpool",
-        )
+        params.update({
+            "aggregator_type" : "meanpool",
+            "layer_infos" : [
+                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
+            ],
+        })
+    
+    model = SupervisedGraphsage(**params)
     
     # Initialize session
     config = tf.ConfigProto(log_device_placement=FLAGS.log_device_placement)
@@ -263,71 +212,49 @@ def train(train_data, test_data=None):
     config.allow_soft_placement = True
     sess = tf.Session(config=config)
     merged = tf.summary.merge_all()
-     
-    # Init variables
     sess.run(tf.global_variables_initializer())
     
-    # Train model
-    avg_time = 0.0
+    load_train_adj = tf.assign(adj_, minibatch.train_adj)
+    load_val_adj = tf.assign(adj_, minibatch.val_adj)
     
-    train_adj_info = tf.assign(adj_info, minibatch.adj)
-    val_adj_info = tf.assign(adj_info, minibatch.val_adj)
+    # Train model
+    total_steps = 0
+    
     for epoch in range(FLAGS.epochs): 
-        minibatch.shuffle()
-        
-        iter = 0
-        print('Epoch: %04d' % (epoch + 1))
-        while not minibatch.is_done:
-            # Construct feed dictionary
-            feed_dict, labels = minibatch.get_train_batch()
-            feed_dict.update({
-                placeholders['dropout']: FLAGS.dropout
-            })
-            
-            t = time.time()
+        for iter_, train_batch in enumerate(minibatch.train_batch_iterator()):
             
             # Training step
-            outs = sess.run([merged, model.opt_op, model.loss, model.preds], feed_dict=feed_dict)
+            _, _, _, train_preds = sess.run([merged, model.opt_op, model.loss, model.preds], feed_dict={
+                placeholders['batch'] : train_batch['batch'],
+                placeholders['batch_size'] : train_batch['batch_size'],
+                placeholders['labels'] : train_batch['labels'],
+                placeholders['dropout'] : FLAGS.dropout
+            })
             
-            if iter % FLAGS.validate_iter == 0:
-                sess.run(val_adj_info.op)
-                
-                val_feed_dict, val_labels = minibatch.get_eval_batch(size=FLAGS.validate_batch_size, test=False)
-                val_node_outs = sess.run([model.preds, model.loss], feed_dict=val_feed_dict)
-                val_f1_mic, val_f1_mac = calc_f1(val_labels, val_node_outs[0])
-                
-                sess.run(train_adj_info.op)
+            if iter_ % FLAGS.validate_iter == 0:
+                sess.run(load_val_adj.op)
+                val_batch = minibatch.get_eval_batch(size=FLAGS.validate_batch_size, test=False)
+                val_f1 = calc_f1(val_batch['labels'], sess.run(model.preds, feed_dict={
+                    placeholders['batch'] : val_batch['batch'],
+                    placeholders['batch_size'] : val_batch['batch_size'],
+                    placeholders['labels'] : val_batch['labels'],
+                }))
+                sess.run(load_train_adj.op)
             
             if total_steps % FLAGS.print_every == 0:
-                train_f1_mic, train_f1_mac = calc_f1(labels, outs[-1])
-                print(
-                    "Iter:", '%04d' % iter, 
-                    "train_f1_mic=", "{:.5f}".format(train_f1_mic),
-                    "train_f1_mac=", "{:.5f}".format(train_f1_mac),
-                    "val_f1_mic=", "{:.5f}".format(val_f1_mic),
-                    "val_f1_mac=", "{:.5f}".format(val_f1_mac),
-                )
+                train_f1 = calc_f1(train_batch['labels'], train_preds)
+                print({
+                    "epoch" : epoch,
+                    "iter" : iter_,
+                    "train_f1" : train_f1,
+                    "val_f1" : val_f1,
+                })
             
-            iter += 1
             total_steps += 1
     
-    sess.run(val_adj_info.op)
+    # --
+    # Eval
     
-    # Final validation performance
-    val_feed_dict, val_labels = minibatch.get_eval_batch(size=None, test=False)
-    val_node_outs = sess.run([model.preds, model.loss], feed_dict=val_feed_dict)
-    val_f1_mic, val_f1_mac = calc_f1(val_labels, val_node_outs[0])
-    print("\nval_f1_mic={:.5f} val_f1_mac={:.5f}".format(val_f1_mic, val_f1_mac))
-    
-    # Final test performance
-    test_feed_dict, test_labels = minibatch.get_eval_batch(size=None, test=True)
-    test_node_outs = sess.run([model.preds, model.loss], feed_dict=test_feed_dict)
-    test_f1_mic, test_f1_mac = calc_f1(test_labels, test_node_outs[0])
-    print("\ntest_f1_mic={:.5f} test_f1_mac={:.5f}".format(test_f1_mic, test_f1_mac))
-
-
-if __name__ == '__main__':
-    assert FLAGS.model in all_models, 'Error: model name unrecognized.'
-    print("Loading training data..")
-    train_data = load_data(FLAGS.train_prefix)
-    train(train_data)
+    sess.run(load_val_adj.op)
+    print({"val_f1" : evaluate(sess, model, minibatch, placeholders, test=False)})
+    print({"test_f1" : evaluate(sess, model, minibatch, placeholders, test=True)})
