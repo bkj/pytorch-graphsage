@@ -34,10 +34,10 @@ class SupervisedGraphsage(object):
         name = self.__class__.__name__.lower()
         self.name = name
         
-        self.aggregator   = aggs[aggregator_type]
-        self.batch_size   = placeholders["batch_size"]
-        self.dropout      = placeholders["dropout"]
-        self.layer_infos  = layer_infos
+        self.aggregator  = aggs[aggregator_type]
+        self.batch_size  = placeholders["batch_size"]
+        self.dropout     = placeholders["dropout"]
+        self.layer_infos = layer_infos
         
         dims = [(0 if features is None else features.shape[1]) + identity_dim]
         dims.extend([layer_infos[i].output_dim for i in range(len(layer_infos))])
@@ -55,12 +55,28 @@ class SupervisedGraphsage(object):
                 features = tf.concat([node_embeddings, features], axis=1)
         
         # Sample
-        samples, support_sizes = self.sample(placeholders["batch"], self.layer_infos)
+        samples = [placeholders["batch"]] # Node itself
+        support_size = 1 # Node itself
+        support_sizes = [support_size] # Node itself
+        
+        inds = range(len(layer_infos))
+        for i, j in zip(inds, reversed(inds)):
+            support_size *= layer_infos[j].num_samples
+            support_sizes.append(support_size)
+            
+            # Sample neighbors
+            node = layer_infos[j].neib_sampler(ids=samples[i], num_samples=layer_infos[j].num_samples)
+            
+            # Flatten
+            node = tf.reshape(node, [support_size * self.batch_size,])
+            
+            # Append to list
+            samples.append(node)
         
         # Aggregate
         aggregated, aggregators = self.aggregate(
             samples=samples, 
-            input_features=[features],
+            input_features=features,
             dims=dims,
             num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
             support_sizes=support_sizes,
@@ -120,24 +136,10 @@ class SupervisedGraphsage(object):
             self.preds = tf.nn.sigmoid(node_predictions)
         else:
             self.preds = tf.nn.softmax(node_predictions)
-            
-        
-    def sample(self, inputs, layer_infos):
-        samples = [inputs]
-        support_size = 1
-        support_sizes = [support_size]
-        for k in range(len(layer_infos)):
-            t = len(layer_infos) - k - 1
-            support_size *= layer_infos[t].num_samples
-            node = layer_infos[t].neib_sampler((samples[k], layer_infos[t].num_samples))
-            samples.append(tf.reshape(node, [support_size * self.batch_size,]))
-            support_sizes.append(support_size)
-        
-        return samples, support_sizes
     
     def aggregate(self, samples, input_features, dims, num_samples, support_sizes, concat, name=None, model_size="small"):
         
-        hidden = [tf.nn.embedding_lookup(input_features, node_samples) for node_samples in samples]
+        hidden = [tf.nn.embedding_lookup([input_features], node_samples) for node_samples in samples]
         
         aggregators = []
         for layer in range(len(num_samples)):
@@ -149,8 +151,8 @@ class SupervisedGraphsage(object):
             dim_mult = 2 if concat and (layer != 0) else 1
             
             aggregator = self.aggregator(
-                dim_mult * dims[layer],
-                dims[layer+1],
+                input_dim=dim_mult * dims[layer],
+                output_dim=dims[layer+1],
                 act=act,
                 dropout=self.dropout,
                 name=name,
