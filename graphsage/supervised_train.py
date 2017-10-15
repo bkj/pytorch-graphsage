@@ -21,6 +21,11 @@ from graphsage.supervised_models import SupervisedGraphsage, SAGEInfo
 # --
 # Helpers
 
+def set_seeds(seed=0):
+    np.random.seed(seed)
+    tf.set_random_seed(seed)
+
+
 class UniformNeighborSampler(object):
     def __init__(self, adj, **kwargs):
         self.adj = adj
@@ -30,6 +35,19 @@ class UniformNeighborSampler(object):
         adj_lists = tf.nn.embedding_lookup(self.adj, ids)
         adj_lists = tf.transpose(tf.random_shuffle(tf.transpose(adj_lists)))
         return tf.slice(adj_lists, [0,0], [-1, num_samples])
+
+
+def calc_f1(y_true, y_pred):
+    if not FLAGS.sigmoid:
+        y_true = np.argmax(y_true, axis=1)
+        y_pred = np.argmax(y_pred, axis=1)
+    else:
+        y_pred = y_pred.round().astype(int)
+    
+    return {
+        "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+        "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+    }
 
 
 def evaluate(sess, model, minibatch, placeholders, mode):
@@ -49,10 +67,7 @@ def evaluate(sess, model, minibatch, placeholders, mode):
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
-# Set random seed
-seed = 123
-np.random.seed(seed)
-tf.set_random_seed(seed)
+set_seeds(123)
 
 # Settings
 flags = tf.app.flags
@@ -86,6 +101,8 @@ flags.DEFINE_integer('validate_batch_size', 256, "how many nodes per validation 
 flags.DEFINE_integer('gpu', 1, "which gpu to use.")
 flags.DEFINE_integer('print_every', 5, "How often to print training info.")
 
+os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
+
 all_models = [
     'graphsage_mean',
     'gcn',
@@ -94,24 +111,9 @@ all_models = [
     'graphsage_meanpool',
 ]
 
-os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
-
-GPU_MEM_FRACTION = 0.8
-
-def calc_f1(y_true, y_pred):
-    if not FLAGS.sigmoid:
-        y_true = np.argmax(y_true, axis=1)
-        y_pred = np.argmax(y_pred, axis=1)
-    else:
-        y_pred = y_pred.round().astype(int)
-    
-    return {
-        "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-        "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
-    }
-
-
 if __name__ == "__main__":
+    
+    set_seeds(456)
     
     assert FLAGS.model in all_models, 'Error: model name unrecognized.'
     
@@ -220,6 +222,8 @@ if __name__ == "__main__":
     
     # --
     # Train 
+    
+    set_seeds(891)
     
     total_steps = 0
     for epoch in range(FLAGS.epochs): 

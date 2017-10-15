@@ -26,31 +26,15 @@ SAGEInfo = namedtuple("SAGEInfo", [
     'output_dim',
 ])
 
-class Model(object):
-    def __init__(self, **kwargs):
-        allowed_kwargs = {'name', 'logging', 'model_size'}
-        for kwarg in kwargs.keys():
-            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
-        
-        name = kwargs.get('name')
-        if not name:
-            name = self.__class__.__name__.lower()
-        
-        self.name = name
-        
-        self.logging = kwargs.get('logging', False)
-        
-        self.vars = {}
-
-
-
-class SupervisedGraphsage(Model):
+class SupervisedGraphsage(object):
     def __init__(self, num_classes,
             placeholders, features, adj, degrees,
             layer_infos, learning_rate, weight_decay, concat=True, aggregator_type="mean", 
             model_size="small", sigmoid=False, identity_dim=0, **kwargs):
         
-        super(SupervisedGraphsage, self).__init__(**kwargs)
+        name = self.__class__.__name__.lower()
+        self.name = name
+        
         
         self.aggregator   = aggs[aggregator_type]
         self.batch_size   = placeholders["batch_size"]
@@ -65,72 +49,67 @@ class SupervisedGraphsage(Model):
            node_embeddings = tf.get_variable("node_embeddings", [adj.get_shape().as_list()[0], identity_dim])
         
         if features is None: 
-            if identity_dim == 0:
-                raise Exception("Must have a positive value for identity feature dimension if no input features given.")
-            
+            assert identity_dim == 0, "Must have a positive value for identity feature dimension if no input features given."
             features = node_embeddings
         else:
             features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
             if not node_embeddings is None:
                 features = tf.concat([node_embeddings, features], axis=1)
         
-        # Optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-        
         # Sample
-        samples1, support_sizes1 = self.sample(placeholders["batch"], self.layer_infos)
+        samples, support_sizes = self.sample(placeholders["batch"], self.layer_infos)
         
         # Aggregate
-        self.outputs1, self.aggregators = self.aggregate(
-            samples=samples1, 
+        aggregated, aggregators = self.aggregate(
+            samples=samples, 
             input_features=[features],
             dims=dims,
             num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
-            support_sizes=support_sizes1,
+            support_sizes=support_sizes,
             concat=concat,
             model_size=model_size
         )
         
         # Normalize
-        self.outputs1 = tf.nn.l2_normalize(self.outputs1, 1)
+        normed_aggregated = tf.nn.l2_normalize(aggregated, 1)
         
         # Predict
         dim_mult = 2 if concat else 1
-        self.node_pred = Dense(
+        fc = Dense(
             dim_mult * dims[-1],
             num_classes,
             dropout=self.dropout,
             act=lambda x : x,
         )
-        self.node_preds = self.node_pred(self.outputs1)
+        node_predictions = fc(normed_aggregated)
         
         # --
         # Define loss
         
-        # regularization
         self.loss = 0
-        for aggregator in self.aggregators:
+        
+        # regularization
+        for aggregator in aggregators:
             for var in aggregator.vars.values():
                 self.loss += weight_decay * tf.nn.l2_loss(var)
         
-        for var in self.node_pred.vars.values():
+        for var in fc.vars.values():
             self.loss += weight_decay * tf.nn.l2_loss(var)
        
         # classification
         if sigmoid:
             self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self.node_preds,
+                    logits=node_predictions,
                     labels=placeholders['labels']))
         else:
             self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                    logits=self.node_preds,
+                    logits=node_predictions,
                     labels=placeholders['labels']))
-            
-        tf.summary.scalar('loss', self.loss)
         
         # --
         # Gradients
         
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
         grads_and_vars = self.optimizer.compute_gradients(self.loss)
         clipped_grads_and_vars = [(tf.clip_by_value(grad, -5.0, 5.0) if grad is not None else None, var) for grad, var in grads_and_vars]
         self.grad, _ = clipped_grads_and_vars[0]
@@ -140,9 +119,9 @@ class SupervisedGraphsage(Model):
         # Predictions
         
         if sigmoid:
-            self.preds = tf.nn.sigmoid(self.node_preds)
+            self.preds = tf.nn.sigmoid(node_predictions)
         else:
-            self.preds = tf.nn.softmax(self.node_preds)
+            self.preds = tf.nn.softmax(node_predictions)
             
         
     def sample(self, inputs, layer_infos):

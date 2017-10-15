@@ -21,6 +21,8 @@ class MeanAggregator(Layer):
         self.bias = bias
         self.act = act
         self.concat = concat
+        self.input_dim = input_dim
+        self.output_dim = output_dim
         
         if neib_input_dim is None:
             neib_input_dim = input_dim
@@ -35,9 +37,6 @@ class MeanAggregator(Layer):
             self.vars['self_weights'] = glorot([input_dim, output_dim], name='self_weights')
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
-            
-        self.input_dim = input_dim
-        self.output_dim = output_dim
         
     def _call(self, inputs):
         self_vecs, neib_vecs = inputs
@@ -76,6 +75,8 @@ class GCNAggregator(Layer):
         self.bias = bias
         self.act = act
         self.concat = concat
+        self.input_dim  = input_dim
+        self.output_dim = output_dim
         
         if neib_input_dim is None:
             neib_input_dim = input_dim
@@ -90,8 +91,6 @@ class GCNAggregator(Layer):
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
                 
-        self.input_dim  = input_dim
-        self.output_dim = output_dim
         
     def _call(self, inputs):
         self_vecs, neib_vecs = inputs
@@ -124,6 +123,10 @@ class MaxPoolingAggregator(Layer):
         if neib_input_dim is None:
             neib_input_dim = input_dim
             
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.neib_input_dim = neib_input_dim
+        
         if name is not None:
             name = '/' + name
         else:
@@ -150,9 +153,6 @@ class MaxPoolingAggregator(Layer):
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
                 
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.neib_input_dim = neib_input_dim
         
     def _call(self, inputs):
         self_vecs, neib_h = inputs
@@ -198,6 +198,10 @@ class MeanPoolingAggregator(Layer):
         if neib_input_dim is None:
             neib_input_dim = input_dim
             
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.neib_input_dim = neib_input_dim
+        
         if name is not None:
             name = '/' + name
         else:
@@ -224,9 +228,6 @@ class MeanPoolingAggregator(Layer):
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
                 
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.neib_input_dim = neib_input_dim
         
     def _call(self, inputs):
         self_vecs, neib_h = inputs
@@ -271,6 +272,10 @@ class TwoMaxLayerPoolingAggregator(Layer):
         if neib_input_dim is None:
             neib_input_dim = input_dim
             
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.neib_input_dim = neib_input_dim
+        
         if name is not None:
             name = '/' + name
         else:
@@ -306,10 +311,6 @@ class TwoMaxLayerPoolingAggregator(Layer):
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
                 
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.neib_input_dim = neib_input_dim
-
     def _call(self, inputs):
         self_vecs, neib_h = inputs
         
@@ -344,39 +345,40 @@ class SeqAggregator(Layer):
     def __init__(self, input_dim, output_dim, model_size="small", neib_input_dim=None,
             dropout=0., bias=False, act=tf.nn.relu, name=None,  concat=False, **kwargs):
         super(SeqAggregator, self).__init__(**kwargs)
-
+        
         self.dropout = dropout
         self.bias = bias
         self.act = act
         self.concat = concat
-
+        
         if neib_input_dim is None:
             neib_input_dim = input_dim
-
+            
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.neib_input_dim = neib_input_dim
+        
         if name is not None:
             name = '/' + name
         else:
             name = ''
-
+            
         if model_size == "small":
             hidden_dim = self.hidden_dim = 128
         elif model_size == "big":
             hidden_dim = self.hidden_dim = 256
-
+            
         with tf.variable_scope(self.name + name + '_vars'):
             self.vars['neib_weights'] = glorot([hidden_dim, output_dim], name='neib_weights')
             self.vars['self_weights'] = glorot([input_dim, output_dim],name='self_weights')
             if self.bias:
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
-
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.neib_input_dim = neib_input_dim
+                
         self.cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_dim)
-
+        
     def _call(self, inputs):
         self_vecs, neib_vecs = inputs
-
+        
         dims = tf.shape(neib_vecs)
         batch_size = dims[0]
         initial_state = self.cell.zero_state(batch_size, tf.float32)
@@ -404,17 +406,17 @@ class SeqAggregator(Layer):
         index = tf.range(0, batch_size) * max_len + (length - 1)
         flat = tf.reshape(rnn_outputs, [-1, out_size])
         neib_h = tf.gather(flat, index)
-
+        
         from_neibs = tf.matmul(neib_h, self.vars['neib_weights'])
         from_self = tf.matmul(self_vecs, self.vars["self_weights"])
          
         output = tf.add_n([from_self, from_neibs])
-
+        
         if not self.concat:
             output = tf.add_n([from_self, from_neibs])
         else:
             output = tf.concat([from_self, from_neibs], axis=1)
-
+            
         # bias
         if self.bias:
             output += self.vars['bias']
