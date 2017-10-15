@@ -140,17 +140,19 @@ def train(train_data, test_data=None):
 
     context_pairs = train_data[3] if FLAGS.random_context else None
     placeholders = construct_placeholders()
-    minibatch = EdgeMinibatchIterator(G, 
-            id_map,
-            placeholders, batch_size=FLAGS.batch_size,
-            max_degree=FLAGS.max_degree, 
-            num_neg_samples=FLAGS.neg_sample_size,
-            context_pairs = context_pairs)
+    minibatch = EdgeMinibatchIterator(
+        G, 
+        id_map,
+        placeholders,
+        batch_size=FLAGS.batch_size,
+        max_degree=FLAGS.max_degree, 
+        num_neg_samples=FLAGS.neg_sample_size,
+        context_pairs = context_pairs
+    )
     adj_info = tf.Variable(tf.constant(minibatch.adj, dtype=tf.int32), trainable=False, name="adj_info")
 
+    sampler = UniformNeighborSampler(adj_info)
     if FLAGS.model == 'graphsage_mean':
-        # Create model
-        sampler = UniformNeighborSampler(adj_info)
         layer_infos = [SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
                             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)]
 
@@ -163,8 +165,6 @@ def train(train_data, test_data=None):
                                      identity_dim = FLAGS.identity_dim,
                                      logging=True)
     elif FLAGS.model == 'gcn':
-        # Create model
-        sampler = UniformNeighborSampler(adj_info)
         layer_infos = [SAGEInfo("node", sampler, FLAGS.samples_1, 2*FLAGS.dim_1),
                             SAGEInfo("node", sampler, FLAGS.samples_2, 2*FLAGS.dim_2)]
 
@@ -180,7 +180,6 @@ def train(train_data, test_data=None):
                                      logging=True)
 
     elif FLAGS.model == 'graphsage_seq':
-        sampler = UniformNeighborSampler(adj_info)
         layer_infos = [SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
                             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)]
 
@@ -195,7 +194,6 @@ def train(train_data, test_data=None):
                                      logging=True)
 
     elif FLAGS.model == 'graphsage_maxpool':
-        sampler = UniformNeighborSampler(adj_info)
         layer_infos = [SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
                             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)]
 
@@ -209,7 +207,6 @@ def train(train_data, test_data=None):
                                      identity_dim = FLAGS.identity_dim,
                                      logging=True)
     elif FLAGS.model == 'graphsage_meanpool':
-        sampler = UniformNeighborSampler(adj_info)
         layer_infos = [SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
                             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)]
 

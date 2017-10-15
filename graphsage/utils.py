@@ -7,15 +7,20 @@ import sys
 import os
 from tqdm import tqdm
 
-from networkx.readwrite import json_graph, read_gpickle
+from networkx.readwrite import json_graph, write_gpickle, read_gpickle
 
 WALK_LEN=5
 N_WALKS=50
 
-def load_data(prefix, normalize=True, load_walks=False):
-    t = time()
-    G = json_graph.node_link_graph(json.load(open(prefix + "-G.json")))
-    time() - t
+def load_data(prefix, normalize=True, load_walks=False, save=False):
+    if not os.path.exists(prefix + '-G.pkl'):
+        print("Loading graph from scratch")
+        G = json_graph.node_link_graph(json.load(open(prefix + "-G.json")))
+        # if save:
+            # write_gpickle(G, prefix + '-G.pkl')
+    # else:
+        # print("Loading cached graph")
+        # G = read_gpickle(prefix + '-G.pkl')
     
     if isinstance(G.nodes()[0], int):
         conversion = lambda n : int(n)

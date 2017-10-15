@@ -60,9 +60,11 @@ class Layer(object):
         with tf.name_scope(self.name):
             if self.logging and not self.sparse_inputs:
                 tf.summary.histogram(self.name + '/inputs', inputs)
+            
             outputs = self._call(inputs)
             if self.logging:
                 tf.summary.histogram(self.name + '/outputs', outputs)
+            
             return outputs
 
     def _log_vars(self):

@@ -98,9 +98,9 @@ def evaluate(sess, model, minibatch_iter, size=None):
 def log_dir():
     log_dir = FLAGS.base_log_dir + "/sup-" + FLAGS.train_prefix.split("/")[-2]
     log_dir += "/{model:s}_{model_size:s}_{lr:0.4f}/".format(
-            model=FLAGS.model,
-            model_size=FLAGS.model_size,
-            lr=FLAGS.learning_rate
+        model=FLAGS.model,
+        model_size=FLAGS.model_size,
+        lr=FLAGS.learning_rate
     )
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -165,29 +165,19 @@ def train(train_data, test_data=None):
         num_classes,
         batch_size=FLAGS.batch_size,
         max_degree=FLAGS.max_degree, 
-        context_pairs = context_pairs
+        context_pairs=context_pairs
     )
     
     adj_info = tf.Variable(tf.constant(minibatch.adj, dtype=tf.int32), trainable=False, name="adj_info")
     
+    sampler = UniformNeighborSampler(adj_info)
+    
     if FLAGS.model == 'graphsage_mean':
-        sampler = UniformNeighborSampler(adj_info)
-        
-        if FLAGS.samples_3 != 0:
-            layer_infos = [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2),
-                SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2)
-            ]
-        elif FLAGS.samples_2 != 0:
-            layer_infos = [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
-                SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
-            ]
-        else:
-            layer_infos = [
-                SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1)
-            ]
+        layer_infos = filter(None, [
+            SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
+            SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2) if FLAGS.samples_2 != 0 else None,
+            SAGEInfo("node", sampler, FLAGS.samples_3, FLAGS.dim_2) if FLAGS.samples_3 != 0 else None,
+        ])
         
         model = SupervisedGraphsage(
             num_classes,
@@ -203,8 +193,6 @@ def train(train_data, test_data=None):
         )
     
     elif FLAGS.model == 'gcn':
-        sampler = UniformNeighborSampler(adj_info)
-        
         layer_infos = [
             SAGEInfo("node", sampler, FLAGS.samples_1, 2 * FLAGS.dim_1),
             SAGEInfo("node", sampler, FLAGS.samples_2, 2 * FLAGS.dim_2)
@@ -227,8 +215,6 @@ def train(train_data, test_data=None):
         )
 
     elif FLAGS.model == 'graphsage_seq':
-        sampler = UniformNeighborSampler(adj_info)
-        
         layer_infos = [
             SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
@@ -250,8 +236,6 @@ def train(train_data, test_data=None):
         )
 
     elif FLAGS.model == 'graphsage_maxpool':
-        sampler = UniformNeighborSampler(adj_info)
-        
         layer_infos = [
             SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
@@ -273,8 +257,6 @@ def train(train_data, test_data=None):
         )
 
     elif FLAGS.model == 'graphsage_meanpool':
-        sampler = UniformNeighborSampler(adj_info)
-        
         layer_infos = [
             SAGEInfo("node", sampler, FLAGS.samples_1, FLAGS.dim_1),
             SAGEInfo("node", sampler, FLAGS.samples_2, FLAGS.dim_2)
@@ -381,14 +363,12 @@ def train(train_data, test_data=None):
     )
     open(log_dir() + "val_stats.txt", "w").write("loss={:.5f} f1_micro={:.5f} f1_macro={:.5f} time={:.5f}".format(val_cost, val_f1_mic, val_f1_mac, duration))
     
-    # 
     val_cost, val_f1_mic, val_f1_mac, duration = incremental_evaluate(sess, model, minibatch, FLAGS.batch_size, test=True)
     open(log_dir() + "test_stats.txt", "w").write("loss={:.5f} f1_micro={:.5f} f1_macro={:.5f}".format(val_cost, val_f1_mic, val_f1_mac))
 
 
 def main(argv=None):
     assert FLAGS.model in all_models, 'Error: model name unrecognized.'
-    
     print("Loading training data..")
     train_data = load_data(FLAGS.train_prefix)
     print("Done loading training data..")
