@@ -135,8 +135,7 @@ class SupervisedGraphsage(object):
         
         return samples, support_sizes
     
-    def aggregate(self, samples, input_features, dims, num_samples, support_sizes,
-            name=None, concat=False, model_size="small"):
+    def aggregate(self, samples, input_features, dims, num_samples, support_sizes, concat, name=None, model_size="small"):
         
         hidden = [tf.nn.embedding_lookup(input_features, node_samples) for node_samples in samples]
         

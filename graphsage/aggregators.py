@@ -11,9 +11,8 @@ from .inits import glorot, zeros
 
 class MeanAggregator(Layer):
     """ Aggregates via mean followed by matmul and non-linearity. """
-    def __init__(self, input_dim, output_dim, neib_input_dim=None,
-            dropout=0., bias=False, act=tf.nn.relu, 
-            name=None, concat=False, **kwargs):
+    def __init__(self, input_dim, output_dim, concat, neib_input_dim=None,
+            dropout=0., bias=False, act=tf.nn.relu, name=None, **kwargs):
         
         super(MeanAggregator, self).__init__(**kwargs)
         
@@ -41,19 +40,17 @@ class MeanAggregator(Layer):
     def _call(self, inputs):
         self_vecs, neib_vecs = inputs
         
-        neib_vecs  = tf.nn.dropout(neib_vecs, 1-self.dropout)
-        self_vecs  = tf.nn.dropout(self_vecs, 1-self.dropout)
+        self_vecs = tf.nn.dropout(self_vecs, 1 - self.dropout)
+        from_self = tf.matmul(self_vecs, self.vars["self_weights"])
+        
+        neib_vecs  = tf.nn.dropout(neib_vecs, 1 - self.dropout)
         neib_means = tf.reduce_mean(neib_vecs, axis=1)
-       
-        # [nodes] x [out_dim]
         from_neibs = tf.matmul(neib_means, self.vars['neib_weights'])
         
-        from_self = tf.matmul(self_vecs, self.vars["self_weights"])
-         
-        if not self.concat:
-            output = tf.add_n([from_self, from_neibs])
-        else:
+        if self.concat:
             output = tf.concat([from_self, from_neibs], axis=1)
+        else:
+            output = tf.add_n([from_self, from_neibs])
             
         # bias
         if self.bias:
@@ -75,7 +72,7 @@ class GCNAggregator(Layer):
         self.bias = bias
         self.act = act
         self.concat = concat
-        self.input_dim  = input_dim
+        self.input_dim = input_dim
         self.output_dim = output_dim
         
         if neib_input_dim is None:
@@ -155,20 +152,20 @@ class MaxPoolingAggregator(Layer):
                 
         
     def _call(self, inputs):
-        self_vecs, neib_h = inputs
+        self_vecs, neib_vecs = inputs
         
-        dims = tf.shape(neib_h)
+        dims = tf.shape(neib_vecs)
         batch_size, num_neighbors = dims[:2]
         
         # [nodes * sampled neibbors] x [hidden_dim]
-        h_reshaped = tf.reshape(neib_h, (batch_size * num_neighbors, self.neib_input_dim))
+        h_reshaped = tf.reshape(neib_vecs, (batch_size * num_neighbors, self.neib_input_dim))
         for mlp_layer in self.mlp_layers:
             h_reshaped = mlp_layer(h_reshaped)
         
-        neib_h = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim))
-        neib_h = tf.reduce_max(neib_h, axis=1)
+        neib_vecs = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim))
+        neib_vecs = tf.reduce_max(neib_vecs, axis=1)
         
-        from_neibs = tf.matmul(neib_h, self.vars['neib_weights'])
+        from_neibs = tf.matmul(neib_vecs, self.vars['neib_weights'])
         from_self = tf.matmul(self_vecs, self.vars["self_weights"])
         
         if not self.concat:
@@ -230,21 +227,21 @@ class MeanPoolingAggregator(Layer):
                 
         
     def _call(self, inputs):
-        self_vecs, neib_h = inputs
+        self_vecs, neib_vecs = inputs
         
-        dims = tf.shape(neib_h)
+        dims = tf.shape(neib_vecs)
         batch_size, num_neighbors= dims[:2]
         
         # [nodes * sampled neibbors] x [hidden_dim]
-        h_reshaped = tf.reshape(neib_h, (batch_size * num_neighbors, self.neib_input_dim))
+        h_reshaped = tf.reshape(neib_vecs, (batch_size * num_neighbors, self.neib_input_dim))
         
         for mlp_layer in self.mlp_layers:
             h_reshaped = mlp_layer(h_reshaped)
         
-        neib_h = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim))
-        neib_h = tf.reduce_mean(neib_h, axis=1)
+        neib_vecs = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim))
+        neib_vecs = tf.reduce_mean(neib_vecs, axis=1)
         
-        from_neibs = tf.matmul(neib_h, self.vars['neib_weights'])
+        from_neibs = tf.matmul(neib_vecs, self.vars['neib_weights'])
         from_self = tf.matmul(self_vecs, self.vars["self_weights"])
         
         if not self.concat:
@@ -312,21 +309,21 @@ class TwoMaxLayerPoolingAggregator(Layer):
                 self.vars['bias'] = zeros([self.output_dim], name='bias')
                 
     def _call(self, inputs):
-        self_vecs, neib_h = inputs
+        self_vecs, neib_vecs = inputs
         
-        dims = tf.shape(neib_h)
+        dims = tf.shape(neib_vecs)
         batch_size = dims[0]
         num_neighbors = dims[1]
         # [nodes * sampled neibbors] x [hidden_dim]
-        h_reshaped = tf.reshape(neib_h, (batch_size * num_neighbors, self.neib_input_dim))
+        h_reshaped = tf.reshape(neib_vecs, (batch_size * num_neighbors, self.neib_input_dim))
         
         for mlp_layer in self.mlp_layers:
             h_reshaped = mlp_layer(h_reshaped)
         
-        neib_h = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim_2))
-        neib_h = tf.reduce_max(neib_h, axis=1)
+        neib_vecs = tf.reshape(h_reshaped, (batch_size, num_neighbors, self.hidden_dim_2))
+        neib_vecs = tf.reduce_max(neib_vecs, axis=1)
         
-        from_neibs = tf.matmul(neib_h, self.vars['neib_weights'])
+        from_neibs = tf.matmul(neib_vecs, self.vars['neib_weights'])
         from_self = tf.matmul(self_vecs, self.vars["self_weights"])
         
         if not self.concat:

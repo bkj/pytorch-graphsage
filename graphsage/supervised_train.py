@@ -14,8 +14,7 @@ import numpy as np
 import tensorflow as tf
 from sklearn import metrics
 
-from graphsage.utils import load_data
-from graphsage.minibatch import NodeMinibatchIterator
+from graphsage.data_loader import NodeDataLoader
 from graphsage.supervised_models import SupervisedGraphsage, SAGEInfo
 
 # --
@@ -50,9 +49,9 @@ def calc_f1(y_true, y_pred):
     }
 
 
-def evaluate(sess, model, minibatch, placeholders, mode):
+def evaluate(sess, model, data_loader, placeholders, mode):
     preds, labels = [], []
-    for eval_batch in minibatch.iterate(mode=mode, shuffle=False):
+    for eval_batch in data_loader.iterate(mode=mode, shuffle=False):
         preds.append(sess.run(model.preds, feed_dict={
             placeholders['batch'] : eval_batch['batch'],
             placeholders['batch_size'] : eval_batch['batch_size'],
@@ -169,51 +168,44 @@ if __name__ == "__main__":
     # --
     # IO
     
-    G, features, id2idx, _, class_map = load_data(FLAGS.train_prefix)
-    
-    if isinstance(list(class_map.values())[0], list):
-        num_classes = len(list(class_map.values())[0])
-    else:
-        num_classes = len(set(class_map.values()))
+    cache_path = '%s-%d-%d-iterator-cache.h5' % (FLAGS.train_prefix, FLAGS.batch_size, FLAGS.max_degree)
+    if not os.path.exists(cache_path):
+        data_loader = NodeDataLoader(
+            data_path=FLAGS.train_prefix,
+            batch_size=FLAGS.batch_size,
+            max_degree=FLAGS.max_degree,
+        )
         
-    # pad with dummy zero vector
-    if features is not None:
-        features = np.vstack([features, np.zeros((features.shape[1],))])
+        data_loader.save(cache_path)
+    else:
+        data_loader = NodeDataLoader(cache_path=cache_path)
     
     # --
     # Define model + sampler
     
-    batch_iterator = NodeMinibatchIterator(
-        G=G,
-        id2idx=id2idx,
-        class_map=class_map,
-        num_classes=num_classes,
-        batch_size=FLAGS.batch_size,
-        max_degree=FLAGS.max_degree,
-    )
-    
-    adj_ = tf.Variable(tf.constant(batch_iterator.train_adj, dtype=tf.int32), trainable=False, name="adj_")
+    adj_ = tf.Variable(tf.constant(data_loader.train_adj, dtype=tf.int32), trainable=False, name="adj_")
     
     placeholders = {
-        'labels'     : tf.placeholder(tf.float32, shape=(None, num_classes), name='labels'),
+        'labels'     : tf.placeholder(tf.float32, shape=(None, data_loader.num_classes), name='labels'),
         'batch'      : tf.placeholder(tf.int32, shape=(None), name='batch'),
         'dropout'    : tf.placeholder_with_default(0., shape=(), name='dropout'),
         'batch_size' : tf.placeholder(tf.int32, name='batch_size'),
     }
     
     params = {
-        "num_classes"   : num_classes,
+        "num_classes"   : data_loader.num_classes,
         "placeholders"  : placeholders,
-        "features"      : features,
+        "features"      : data_loader.features,
         "adj"           : adj_,
-        "degrees"       : batch_iterator.degrees,
+        "degrees"       : data_loader.degrees,
         "model_size"    : FLAGS.model_size,
         "sigmoid"       : FLAGS.sigmoid,
         "identity_dim"  : FLAGS.identity_dim,
         "learning_rate" : FLAGS.learning_rate,
         "weight_decay"  : FLAGS.weight_decay,
     }
-    params.update(select_model(FLAGS.model, UniformNeighborSampler(adj_)))
+    sampler = UniformNeighborSampler(adj_)
+    params.update(select_model(FLAGS.model, sampler))
     model = SupervisedGraphsage(**params)
     
     # --
@@ -225,8 +217,8 @@ if __name__ == "__main__":
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
     
-    load_train_adj = tf.assign(adj_, batch_iterator.train_adj)
-    load_val_adj = tf.assign(adj_, batch_iterator.val_adj)
+    load_train_adj = tf.assign(adj_, data_loader.train_adj)
+    load_val_adj = tf.assign(adj_, data_loader.val_adj)
     
     # --
     # Train 
@@ -235,7 +227,7 @@ if __name__ == "__main__":
     
     total_steps = 0
     for epoch in range(FLAGS.epochs): 
-        for iter_, train_batch in enumerate(batch_iterator.iterate(mode='train', shuffle=True)):
+        for iter_, train_batch in enumerate(data_loader.iterate(mode='train', shuffle=True)):
             
             # Training step
             _, _, train_preds = sess.run([model.opt_op, model.loss, model.preds], feed_dict={
@@ -248,7 +240,7 @@ if __name__ == "__main__":
             # Validation performance
             if iter_ % FLAGS.validate_iter == 0:
                 sess.run(load_val_adj.op)
-                val_batch = batch_iterator.sample_eval_batch(size=FLAGS.validate_batch_size, mode='val')
+                val_batch = data_loader.sample_eval_batch(size=FLAGS.validate_batch_size, mode='val')
                 val_f1 = calc_f1(val_batch['labels'], sess.run(model.preds, feed_dict={
                     placeholders['batch'] : val_batch['batch'],
                     placeholders['batch_size'] : val_batch['batch_size'],
@@ -272,5 +264,5 @@ if __name__ == "__main__":
     # Eval
     
     sess.run(load_val_adj.op)
-    print({"val_f1" : evaluate(sess, model, batch_iterator, placeholders, mode='test')})
-    print({"test_f1" : evaluate(sess, model, batch_iterator, placeholders, mode='val')})
+    print({"val_f1" : evaluate(sess, model, data_loader, placeholders, mode='test')})
+    print({"test_f1" : evaluate(sess, model, data_loader, placeholders, mode='val')})
