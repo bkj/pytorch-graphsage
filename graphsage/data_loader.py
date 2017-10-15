@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 import h5py
-import json
+import cPickle
 import numpy as np
 
 from graphsage.utils import load_data
@@ -25,7 +25,7 @@ class NodeDataLoader(object):
             raise Exception('NodeDataLoader: either `data_path` or `cache_path` must != None ')
     
     def __init(self, data_path, batch_size, max_degree):
-        G, features, id2idx, _, class_map = load_data(data_path)
+        G, features, id2idx, class_map = load_data(data_path)
         
         # Munge features
         if features is not None:
@@ -49,8 +49,8 @@ class NodeDataLoader(object):
         
         self.nodes = {
             "train" : np.array(train_nodes),
-            "val" : np.array(val_nodes),
-            "test" : np.array(test_nodes),
+            "val"   : np.array(val_nodes),
+            "test"  : np.array(test_nodes),
         }
         
         self.batch_size  = batch_size
@@ -61,49 +61,41 @@ class NodeDataLoader(object):
     def __load(self, cache_path):
         f = h5py.File(cache_path)
         
-        print('ok1')
-        self.id2idx       = dict([(int(k),v) for k,v in json.loads(f['id2idx'].value).iteritems()])
+        self.id2idx       = cPickle.loads(f['id2idx'].value)
         self.batch_size   = f['batch_size'].value
-        self.class_map    = dict([(int(k),v) for k,v in json.loads(f['class_map'].value).iteritems()])
+        self.class_map    = cPickle.loads(f['class_map'].value)
         self.num_classes  = f['num_classes'].value
         
-        print('ok2')
         self.features = f['features'].value
         
-        print('ok3')
         self.train_adj = f['train_adj'].value
         self.degrees   = f['degrees'].value
         self.val_adj   = f['val_adj'].value
         
-        print('ok4')
         self.nodes = {
-            "train" : f['nodes/train'].value,
-            "val" : f['nodes/val'].value,
-            "test" : f['nodes/test'].value,
+            "train" : cPickle.loads(f['nodes/train'].value),
+            "val"   : cPickle.loads(f['nodes/val'].value),
+            "test"  : cPickle.loads(f['nodes/test'].value),
         }
         
         f.close()
     
     def save(self, outpath):
         f = h5py.File(outpath)
+
+        f['batch_size']  = self.batch_size
+        f['num_classes'] = self.num_classes        
+        f['id2idx']      = cPickle.dumps(self.id2idx)
+        f['class_map']   = cPickle.dumps(self.class_map)
+        f['features']    = self.features
         
-        f['id2idx']       = json.dumps(self.id2idx)
-        f['batch_size']   = self.batch_size
-        f['class_map']    = json.dumps(self.class_map)
-        f['num_classes']  = self.num_classes
+        f['train_adj']   = self.train_adj
+        f['degrees']     = self.degrees
+        f['val_adj']     = self.val_adj
         
-        f['features'] = self.features
-        
-        f['train_adj'] = self.train_adj
-        f['degrees']   = self.degrees
-        f['val_adj']   = self.val_adj
-        
-        print('ok2')
-        print(self.nodes['train'])
-        
-        f['nodes/train'] = self.nodes['train']
-        f['nodes/val']   = self.nodes['val']
-        f['nodes/test']  = self.nodes['test']
+        f['nodes/train'] = cPickle.dumps(self.nodes['train'])
+        f['nodes/val']   = cPickle.dumps(self.nodes['val'])
+        f['nodes/test']  = cPickle.dumps(self.nodes['test'])
         
         f.close()
     
@@ -111,18 +103,17 @@ class NodeDataLoader(object):
         adj = np.zeros((len(id2idx) + 1, max_degree)) + len(id2idx)
         degrees = np.zeros(len(id2idx))
         
-        for nodeid in G.nodes():
+        for node_id in G.nodes():
             if train:
-                if G.node[nodeid]['test'] or G.node[nodeid]['val']:
+                if G.node[node_id]['test'] or G.node[node_id]['val']:
                     continue
                 
-                # ?? What is `train_removed`?
-                neighbors = np.array([id2idx[neighbor] for neighbor in G.neighbors(nodeid)
-                    if (not G[nodeid][neighbor]['train_removed'])])
+                neighbors = np.array([id2idx[neighbor] for neighbor in G.neighbors(node_id)
+                    if (not G[node_id][neighbor]['train_removed'])])
                 
-                degrees[id2idx[nodeid]] = len(neighbors)
+                degrees[id2idx[node_id]] = len(neighbors)
             else:
-                neighbors = np.array([id2idx[neighbor] for neighbor in G.neighbors(nodeid)])
+                neighbors = np.array([id2idx[neighbor] for neighbor in G.neighbors(node_id)])
             
             if len(neighbors) == 0:
                 # If no neighbors, skip
@@ -134,7 +125,7 @@ class NodeDataLoader(object):
                 # If degree is too small, sample w/ replacement
                 neighbors = np.random.choice(neighbors, max_degree, replace=True)
             
-            adj[id2idx[nodeid], :] = neighbors
+            adj[id2idx[node_id], :] = neighbors
         
         return adj, degrees
     

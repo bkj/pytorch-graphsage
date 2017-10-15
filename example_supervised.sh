@@ -7,7 +7,7 @@
 
 python -m graphsage.supervised_train \
     --train_prefix ./data/reddit/reddit \
-    --model gcn \
+    --model graphsage_mean \
     --sigmoid
 
 # Full validation stats: loss= 0.01206 f1_micro= 0.92721 f1_macro= 0.87990 time= 2.08346

@@ -27,6 +27,7 @@ def set_seeds(seed=0):
 
 class UniformNeighborSampler(object):
     def __init__(self, adj, **kwargs):
+        print(adj)
         self.adj = adj
         
     def __call__(self, ids, num_samples):
@@ -183,6 +184,7 @@ if __name__ == "__main__":
     # --
     # Define model + sampler
     
+    print(data_loader.train_adj)
     adj_ = tf.Variable(tf.constant(data_loader.train_adj, dtype=tf.int32), trainable=False, name="adj_")
     
     placeholders = {
