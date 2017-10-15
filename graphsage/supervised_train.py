@@ -15,10 +15,9 @@ import tensorflow as tf
 from sklearn import metrics
 
 from graphsage.utils import load_data
-from graphsage.models import SAGEInfo
 from graphsage.minibatch import NodeMinibatchIterator
 from graphsage.neigh_samplers import UniformNeighborSampler
-from graphsage.supervised_models import SupervisedGraphsage
+from graphsage.supervised_models import SupervisedGraphsage, SAGEInfo
 
 # --
 # Params

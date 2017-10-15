@@ -5,8 +5,11 @@
 """
 
 import tensorflow as tf
-import graphsage.layers as layers
-from graphsage.aggregators import MeanAggregator, MaxPoolingAggregator, MeanPoolingAggregator, SeqAggregator, GCNAggregator
+from collections import namedtuple
+
+from graphsage.layers import Dense
+from graphsage.aggregators import MeanAggregator, MaxPoolingAggregator, \
+    MeanPoolingAggregator, SeqAggregator, GCNAggregator
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -18,6 +21,13 @@ aggs = {
     "maxpool": MaxPoolingAggregator,
     "gcn": GCNAggregator,
 }
+
+SAGEInfo = namedtuple("SAGEInfo", [
+    'layer_name', # name of the layer (to get feature embedding etc.)
+    'neigh_sampler', # callable neigh_sampler constructor
+    'num_samples',
+    'output_dim' # the output (i.e., hidden) dimension
+])
 
 class Model(object):
     def __init__(self, **kwargs):
@@ -50,8 +60,6 @@ class Model(object):
 
 
 class SupervisedGraphsage(Model):
-    """Implementation of supervised GraphSAGE."""
-
     def __init__(self, num_classes,
             placeholders, features, adj, degrees,
             layer_infos, concat=True, aggregator_type="mean", 
@@ -74,9 +82,9 @@ class SupervisedGraphsage(Model):
         self.aggregator_cls = aggs[aggregator_type]
         
         # get info from placeholders...
-        self.inputs1 = placeholders["batch"]
+        self.inputs1    = placeholders["batch"]
         self.model_size = model_size
-        self.adj_info = adj
+        self.adj_info   = adj
         
         self.embeds = None
         if identity_dim > 0:
@@ -119,7 +127,7 @@ class SupervisedGraphsage(Model):
         self.outputs1 = tf.nn.l2_normalize(self.outputs1, 1)
         
         dim_mult = 2 if self.concat else 1
-        self.node_pred = layers.Dense(dim_mult*self.dims[-1], self.num_classes, 
+        self.node_pred = Dense(dim_mult*self.dims[-1], self.num_classes, 
                 dropout=self.placeholders['dropout'],
                 act=lambda x : x)
         
@@ -171,6 +179,7 @@ class SupervisedGraphsage(Model):
         
         if batch_size is None:
             batch_size = self.batch_size
+        
         samples = [inputs]
         # size of convolution support at each layer per node
         support_size = 1
@@ -178,8 +187,7 @@ class SupervisedGraphsage(Model):
         for k in range(len(layer_infos)):
             t = len(layer_infos) - k - 1
             support_size *= layer_infos[t].num_samples
-            sampler = layer_infos[t].neigh_sampler
-            node = sampler((samples[k], layer_infos[t].num_samples))
+            node = layer_infos[t].neigh_sampler((samples[k], layer_infos[t].num_samples))
             samples.append(tf.reshape(node, [support_size * batch_size,]))
             support_sizes.append(support_size)
         
@@ -207,9 +215,11 @@ class SupervisedGraphsage(Model):
             
         # length: number of layers + 1
         hidden = [tf.nn.embedding_lookup(input_features, node_samples) for node_samples in samples]
+        
         new_agg = aggregators is None
         if new_agg:
             aggregators = []
+        
         for layer in range(len(num_samples)):
             if new_agg:
                 dim_mult = 2 if concat and (layer != 0) else 1
@@ -225,6 +235,7 @@ class SupervisedGraphsage(Model):
                 aggregators.append(aggregator)
             else:
                 aggregator = aggregators[layer]
+            
             # hidden representation at current layer for all support nodes that are various hops away
             next_hidden = []
             # as layer increases, the number of support nodes needed decreases
@@ -233,8 +244,9 @@ class SupervisedGraphsage(Model):
                 neigh_dims = [batch_size * support_sizes[hop], 
                               num_samples[len(num_samples) - hop - 1], 
                               dim_mult*dims[layer]]
-                h = aggregator((hidden[hop],
-                                tf.reshape(hidden[hop + 1], neigh_dims)))
+                h = aggregator((hidden[hop], tf.reshape(hidden[hop + 1], neigh_dims)))
                 next_hidden.append(h)
+            
             hidden = next_hidden
+        
         return hidden[0], aggregators
