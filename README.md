@@ -1,8 +1,8 @@
 #### graphsage
 
-See [original repo](https://github.com/williamleif/GraphSAGE) for information.  I'm attempting a major refactor, and likely a port to `pytorch`.  
+(Partial) Pytorch port of https://github.com/williamleif/GraphSAGE
 
-Only working on supervised models right now.
+A vastly simplified version of the Tensorflow version can be found on branch `tf-simple`
 
 ##### LICENSE
 MIT
