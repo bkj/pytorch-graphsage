@@ -1,22 +1,22 @@
 #!/usr/bin/env python
 
 """
-    pytorch_models.py
+    models.py
 """
 
+from __future__ import division
+from __future__ import print_function
+
 from functools import partial
-from collections import OrderedDict
 
 import torch
 from torch import nn
-from torch.autograd import Variable
-from torch.nn import functional as F
 
 # --
 # Aggregators
 
 class MeanAggregator(nn.Module):
-    def __init__(self, input_dim, output_dim, activation=F.relu, combine_fn=lambda x: torch.cat(x, dim=1)):
+    def __init__(self, input_dim, output_dim, activation, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MeanAggregator, self).__init__()
         
         self.fc_x = nn.Linear(input_dim, output_dim, bias=False)
@@ -34,7 +34,7 @@ class MeanAggregator(nn.Module):
     def forward(self, x, neibs):
         x_emb = self.fc_x(x)
         
-        # !! Be careful
+        # !! Be careful w/ dimensions here -- messed it up the first time
         agg_neib = neibs.view(x.size(0), -1, neibs.size(1))
         agg_neib = agg_neib.mean(dim=1)
         neib_emb = self.fc_neib(agg_neib)
@@ -45,22 +45,23 @@ class MeanAggregator(nn.Module):
         
         return out
 
+aggregator_lookup = {
+    "mean" : MeanAggregator,
+}
+
 # --
-# Models
+# Model
 
 class GSSupervised(nn.Module):
-    def __init__(self, input_dim, num_classes, layer_specs, learning_rate, weight_decay):
-        
+    def __init__(self, input_dim, num_classes, aggregator, layer_specs, learning_rate, weight_decay):
         super(GSSupervised, self).__init__()
-        
-        self.sampler_fns = [partial(s['sample_fn'], n_samples=s['n_samples']) for s in layer_specs]
         
         # --
         # Define network
         
         agg_layers = []
         for spec in layer_specs:
-            agg = MeanAggregator(
+            agg = aggregator_lookup[aggregator](
                 input_dim=input_dim,
                 output_dim=spec['output_dim'],
                 activation=spec['activation'],
@@ -70,6 +71,11 @@ class GSSupervised(nn.Module):
         
         self.agg_layers = nn.Sequential(*agg_layers)
         self.fc = nn.Linear(input_dim, num_classes, bias=True)
+        
+        # --
+        # Define samplers
+        
+        self.sampler_fns = [partial(s['sample_fn'], n_samples=s['n_samples']) for s in layer_specs]
         
         # --
         # Optimizer
@@ -85,17 +91,17 @@ class GSSupervised(nn.Module):
         return all_feats
     
     def forward(self, ids, features, adj):
-        
         # Collect features for points in neighborhoods of ids
         all_feats = self._sample(ids, features, adj)
         
         # Sequentially apply layers, per original (little weird, IMO)
+        # Each iteration reduces length of array by one
         for agg_layer in self.agg_layers.children():
             all_feats = [agg_layer(all_feats[k], all_feats[k + 1]) for k in range(len(all_feats) - 1)]
         
-        assert len(all_feats) == 1
-        out = all_feats[0]
-        out = F.normalize(out, dim=1)
+        assert len(all_feats) == 1, "len(all_feats) != 1"
+        
+        out = F.normalize(all_feats[0], dim=1)
         return self.fc(out)
     
     def train_step(self, ids, features, adj, labels):
@@ -105,5 +111,5 @@ class GSSupervised(nn.Module):
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()
-        return preds, loss.data[0]
+        return preds
 

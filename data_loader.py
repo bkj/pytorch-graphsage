@@ -7,22 +7,24 @@
 from __future__ import division
 from __future__ import print_function
 
+import os
+import sys
 import h5py
 import cPickle
 import numpy as np
-
-from graphsage.utils import load_data
+import ujson as json
+from networkx.readwrite import json_graph
 
 class NodeDataLoader(object):
     def __init__(self, data_path=None, cache_path=None, batch_size=100, max_degree=25):
         if data_path:
-            print("Building NodeDataLoader from data")
+            print("Building NodeDataLoader from data", file=sys.stderr)
             self.__init(data_path, batch_size, max_degree)
         elif cache_path:
-            print("Loading NodeDataLoader from cache")
+            print("Loading NodeDataLoader from cache", file=sys.stderr)
             self.__load(cache_path)
         else:
-            raise Exception('NodeDataLoader: either `data_path` or `cache_path` must != None ')
+            raise Exception('NodeDataLoader: either `data_path` or `cache_path` must != None')
     
     def __init(self, data_path, batch_size, max_degree):
         G, features, id2idx, class_map = load_data(data_path)
@@ -82,7 +84,7 @@ class NodeDataLoader(object):
     
     def save(self, outpath):
         f = h5py.File(outpath)
-
+        
         f['batch_size']  = self.batch_size
         f['num_classes'] = self.num_classes        
         f['id2idx']      = cPickle.dumps(self.id2idx)
@@ -141,18 +143,6 @@ class NodeDataLoader(object):
             label_vec[class_ind] = 1
             return label_vec
     
-    def batch_feed_dict(self, batch_nodes, val=False):
-        return {
-            'batch_size' : len(batch_nodes),
-            'batch' : [self.id2idx[n] for n in batch_nodes],
-            'labels' : np.vstack([self._make_label_vec(node) for node in batch_nodes])
-        }
-        
-    def sample_eval_batch(self, size=None, mode='val'):
-        nodes = self.nodes[mode]
-        nodes = nodes if size is None else np.random.choice(nodes, size, replace=True)
-        return self.batch_feed_dict(nodes)
-    
     def iterate(self, mode, shuffle=False):
         nodes = self.nodes[mode]
         
@@ -162,4 +152,57 @@ class NodeDataLoader(object):
             idx = np.arange(len(nodes)).astype(int)
         
         for idx_chunk in np.array_split(idx, idx.shape[0] // self.batch_size + 1):
-            yield self.batch_feed_dict(nodes[idx_chunk])
+            batch_nodes = nodes[idx_chunk]
+            yield {
+                'batch_size' : len(batch_nodes),
+                'batch' : [self.id2idx[n] for n in batch_nodes],
+                'labels' : np.vstack([self._make_label_vec(node) for node in batch_nodes])
+            }
+
+
+def load_data(data_path, normalize=True):
+    # --
+    # Load
+    
+    G = json_graph.node_link_graph(json.load(open(os.path.join(data_path, "G.json"))))
+    class_map = json.load(open(os.path.join(data_path, "class_map.json")))
+    id_map = json.load(open(os.path.join(data_path, "id_map.json")))
+    
+    feats = None
+    if os.path.exists(os.path.join(data_path, "feats.npy")):
+        feats = np.load(os.path.join(data_path, "feats.npy"))
+    
+    # --
+    # Format
+    
+    if isinstance(G.nodes()[0], int):
+        conversion = lambda n : int(n)
+    else:
+        conversion = lambda n : str(n)
+    
+    if isinstance(list(class_map.values())[0], list):
+        lab_conversion = lambda n : n
+    else:
+        lab_conversion = lambda n : int(n)
+    
+    
+    id_map    = {conversion(k):int(v) for k,v in id_map.items()}
+    class_map = {conversion(k):lab_conversion(v) for k,v in class_map.items()}
+    
+    # Remove edges not in training dataset
+    for edge in G.edges():
+        if (G.node[edge[0]]['val'] or G.node[edge[1]]['val'] or G.node[edge[0]]['test'] or G.node[edge[1]]['test']):
+            G[edge[0]][edge[1]]['train_removed'] = True
+        else:
+            G[edge[0]][edge[1]]['train_removed'] = False
+    
+    # Normalize features
+    if normalize and not feats is None:
+        from sklearn.preprocessing import StandardScaler
+        train_ids = np.array([id_map[n] for n in G.nodes() if not G.node[n]['val'] and not G.node[n]['test']])
+        train_feats = feats[train_ids]
+        scaler = StandardScaler()
+        scaler.fit(train_feats)
+        feats = scaler.transform(feats)
+    
+    return G, feats, id_map, class_map
