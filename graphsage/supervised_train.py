@@ -200,7 +200,6 @@ if __name__ == "__main__":
         "placeholders"  : placeholders,
         "features"      : data_loader.features,
         "adj"           : adj_,
-        "degrees"       : data_loader.degrees,
         "model_size"    : FLAGS.model_size,
         "sigmoid"       : FLAGS.sigmoid,
         "identity_dim"  : FLAGS.identity_dim,

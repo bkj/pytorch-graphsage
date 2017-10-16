@@ -4,127 +4,159 @@
     pytorch_models.py
 """
 
-# from graphsage.aggregators import MeanAggregator, MaxPoolingAggregator, \
-#     MeanPoolingAggregator, SeqAggregator, GCNAggregator
+import torch
+from torch import nn
+from torch.autograd import Variable
+from torch.nn import functional as F
 
-aggs = {
-    "mean" : MeanAggregator,
-    "seq" : SeqAggregator,
-    "meanpool" : MeanPoolingAggregator,
-    "maxpool" : MaxPoolingAggregator,
-    "gcn" : GCNAggregator,
-}
+from graphsage.pytorch_aggregators import *
 
-class SupervisedGraphsage(object):
-    def __init__(self, num_classes, features, adj, degrees,
-            layer_infos, learning_rate, weight_decay, concat=True, aggregator_type="mean", 
-            model_size="small", sigmoid=False, identity_dim=0):
+# aggs = {
+#     "mean" : MeanAggregator,
+#     "seq" : SeqAggregator,
+#     "meanpool" : MeanPoolingAggregator,
+#     "maxpool" : MaxPoolingAggregator,
+#     "gcn" : GCNAggregator,
+# }
+
+class SupervisedGraphsage(nn.Module):
+    def __init__(self, input_dim, num_classes, layer_infos, learning_rate, weight_decay, concat=True):
         
-        name = self.__class__.__name__.lower()
-        self.name = name
+        super(SupervisedGraphsage, self).__init__()
         
-        self.aggregator  = aggs[aggregator_type]
-        self.batch_size  = placeholders["batch_size"]
-        self.dropout     = placeholders["dropout"]
         self.layer_infos = layer_infos
         
-        dims = [(0 if features is None else features.shape[1]) + identity_dim]
-        dims.extend([layer_infos[i].output_dim for i in range(len(layer_infos))])
+        # --
+        # Define network
         
-        node_embeddings = None
-        if identity_dim > 0:
-           node_embeddings = tf.get_variable("node_embeddings", [adj.get_shape().as_list()[0], identity_dim])
-        
-        if features is None: 
-            assert identity_dim == 0, "Must have a positive value for identity feature dimension if no input features given."
-            features = node_embeddings
-        else:
-            features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
-            if not node_embeddings is None:
-                features = tf.concat([node_embeddings, features], axis=1)
-        
-        # Sample
-        samples = [placeholders["batch"]] # Node itself
-        support_size = 1 # Node itself
-        support_sizes = [support_size] # Node itself
-        
-        inds = range(len(layer_infos))
-        for i, j in zip(inds, reversed(inds)):
-            support_size *= layer_infos[j].num_samples
-            support_sizes.append(support_size)
-            
-            # Sample neighbors
-            node = layer_infos[j].neib_sampler(ids=samples[i], num_samples=layer_infos[j].num_samples)
-            
-            # Flatten
-            node = tf.reshape(node, [support_size * self.batch_size,])
-            
-            # Append to list
-            samples.append(node)
-        
-        # Aggregate
-        aggregated, aggregators = self.aggregate(
-            samples=samples, 
-            input_features=features,
-            dims=dims,
-            num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
-            support_sizes=support_sizes,
-            concat=concat,
-            model_size=model_size
-        )
-        
-        # Normalize
-        normed_aggregated = tf.nn.l2_normalize(aggregated, 1)
-        
-        # Predict
         dim_mult = 2 if concat else 1
-        fc = Dense(
-            dim_mult * dims[-1],
-            num_classes,
-            dropout=self.dropout,
-            act=lambda x : x,
-        )
-        node_predictions = fc(normed_aggregated)
+        
+        # "early"
+        self.hop2_self = nn.Linear(input_dim, layer_infos[2]['output_dim'])
+        self.hop1_self = nn.Linear(input_dim, layer_infos[1]['output_dim'])
+        
+        self.hop2_neib = nn.Linear(input_dim, layer_infos[2]['output_dim'])
+        self.hop1_neib = nn.Linear(2 * layer_infos[2]['output_dim'], layer_infos[1]['output_dim'])
+        
+        # "final"
+        self.fc = nn.Linear(dim_mult * layer_infos[1]['output_dim'], num_classes)
         
         # --
-        # Define loss
+        # Optimizer
         
-        self.loss = 0
+        self.opt = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         
-        # regularization
-        for aggregator in aggregators:
-            for var in aggregator.vars.values():
-                self.loss += weight_decay * tf.nn.l2_loss(var)
+        # dims = [(0 if features is None else features.shape[1]) + identity_dim]
+        # dims.extend([layer_infos[i]['output_dim'] for i in range(len(layer_infos))])
         
-        for var in fc.vars.values():
-            self.loss += weight_decay * tf.nn.l2_loss(var)
+        # self.node_embeddings = None
+        # if identity_dim > 0:
+        #    self.node_embeddings = nn.Embedding(num_embeddings=adj.size(0), embedding_dim=identity_dim)
+        
+        # if features is None: 
+        #     assert identity_dim == 0, "Must have a positive value for identity feature dimension if no input features given."
+        #     features = node_embeddings
+        # else:
+        #     features = Variable(torch.FloatTensor(features), requires_grad=False)
+        #     if not node_embeddings is None:
+        #         features = torch.cat([node_embeddings, features], dim=1)
+    
+    def forward(self, ids, features, adj):
+        
+        # Collect features
+        all_feats = {0 : features[ids]}
+        for i in range(1, len(self.layer_infos) + 1):
+            ids = self.layer_infos[i]['sample_fn'](ids=ids, adj=adj, n_samples=self.layer_infos[i]['n_samples'])
+            ids = ids.contiguous().view(-1)
+            all_feats[i] = features[ids]
+        
+        # Predict, from furthest to nearest
+        agg_neib = all_feats[2].view(all_feats[1].size(0), all_feats[2].size(1), -1)
+        agg_neib = agg_neib.mean(dim=-1)
+        h2 = torch.cat([self.hop2_self(all_feats[1]), self.hop2_neib(agg_neib)], dim=1)
+        h2 = F.relu(h2)
+        
+        agg_neib = h2.view(all_feats[0].size(0), h2.size(1), -1)
+        agg_neib = agg_neib.mean(dim=-1)
+        h1 = torch.cat([self.hop1_self(all_feats[0]), self.hop1_neib(agg_neib)], dim=-1)
+        
+        # h = F.normalize(h1, dim=1)
+        h = h1
+        return self.fc(h)
+    
+    def train_step(self, ids, features, adj, labels):
+        self.opt.zero_grad()
+        preds = self(ids, features, adj)
+        loss = F.multilabel_soft_margin_loss(preds, labels)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        self.opt.step()
+        return preds, loss.data[0]
+        
+    
+        # # Aggregate
+        # aggregated, aggregators = self.aggregate(
+        #     samples=samples, 
+        #     input_features=features,
+        #     dims=dims,
+        #     num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
+        #     support_sizes=support_sizes,
+        #     concat=concat,
+        #     model_size=model_size
+        # )
+        
+        # # Normalize
+        # normed_aggregated = tf.nn.l2_normalize(aggregated, 1)
+        
+        # # Predict
+        # dim_mult = 2 if concat else 1
+        # fc = Dense(
+        #     dim_mult * dims[-1],
+        #     num_classes,
+        #     dropout=self.dropout,
+        #     act=lambda x : x,
+        # )
+        # node_predictions = fc(normed_aggregated)
+        
+        # # --
+        # # Define loss
+        
+        # self.loss = 0
+        
+        # # regularization
+        # for aggregator in aggregators:
+        #     for var in aggregator.vars.values():
+        #         self.loss += weight_decay * tf.nn.l2_loss(var)
+        
+        # for var in fc.vars.values():
+        #     self.loss += weight_decay * tf.nn.l2_loss(var)
        
-        # classification
-        if sigmoid:
-            self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=node_predictions,
-                    labels=placeholders['labels']))
-        else:
-            self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                    logits=node_predictions,
-                    labels=placeholders['labels']))
+        # # classification
+        # if sigmoid:
+        #     self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+        #             logits=node_predictions,
+        #             labels=placeholders['labels']))
+        # else:
+        #     self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+        #             logits=node_predictions,
+        #             labels=placeholders['labels']))
         
-        # --
-        # Gradients
+        # # --
+        # # Gradients
         
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-        grads_and_vars = self.optimizer.compute_gradients(self.loss)
-        clipped_grads_and_vars = [(tf.clip_by_value(grad, -5.0, 5.0) if grad is not None else None, var) for grad, var in grads_and_vars]
-        self.grad, _ = clipped_grads_and_vars[0]
-        self.opt_op = self.optimizer.apply_gradients(clipped_grads_and_vars)
+        # self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+        # grads_and_vars = self.optimizer.compute_gradients(self.loss)
+        # clipped_grads_and_vars = [(tf.clip_by_value(grad, -5.0, 5.0) if grad is not None else None, var) for grad, var in grads_and_vars]
+        # self.grad, _ = clipped_grads_and_vars[0]
+        # self.opt_op = self.optimizer.apply_gradients(clipped_grads_and_vars)
         
-        # --
-        # Predictions
+        # # --
+        # # Predictions
         
-        if sigmoid:
-            self.preds = tf.nn.sigmoid(node_predictions)
-        else:
-            self.preds = tf.nn.softmax(node_predictions)
+        # if sigmoid:
+        #     self.preds = tf.nn.sigmoid(node_predictions)
+        # else:
+        #     self.preds = tf.nn.softmax(node_predictions)
     
     def aggregate(self, samples, input_features, dims, num_samples, support_sizes, concat, name=None, model_size="small"):
         

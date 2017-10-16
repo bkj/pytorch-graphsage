@@ -34,39 +34,25 @@ def to_numpy(x):
     
     return x.cpu().numpy() if x.is_cuda else x.numpy()
 
-class UniformNeighborSampler(object):
-    def __init__(self, adj, **kwargs):
-        self.adj = adj
-        
-    def __call__(self, ids, num_samples=-1):
-        # Select rows by nodes
-        tmp = self.adj[ids]
-        # Select random columns, up to num_samples
-        tmp = tmp[:,torch.randperm(tmp.size(1))]
-        return tmp[:,:num_samples]
+def uniform_neighbor_sampler(ids, adj, n_samples=-1):
+    # !! Should do "random gather" instead
+    tmp = adj[ids]
+    tmp = tmp[:,torch.randperm(tmp.size(1)).cuda()]
+    return tmp[:,:n_samples]
 
-def calc_f1(y_true, y_pred):
-    if not FLAGS.sigmoid:
+
+def calc_f1(y_true, y_pred, sigmoid=True):
+    if not sigmoid:
         y_true = np.argmax(y_true, axis=1)
         y_pred = np.argmax(y_pred, axis=1)
     else:
-        y_pred = y_pred.round().astype(int)
+        y_pred = (y_pred > 0).astype(int)
     
     return {
         "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
         "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
     }
 
-
-def evaluate(model, data_loader, mode):
-    preds, labels = [], []
-    for eval_batch in data_loader.iterate(mode=mode, shuffle=False):
-        X = Variable(torch.FloatTensor(eval_batch['batch']))
-        preds = model(X)
-        preds.append(to_numpy(preds))
-        preds.append(eval_batch['labels'])
-    
-    return calc_f1(np.vstack(labels), np.vstack(preds))
 
 # --
 # Args
@@ -86,7 +72,6 @@ def parse_args():
     parser.add_argument('--max_degree', default=128)
     parser.add_argument('--samples_1', default=25)
     parser.add_argument('--samples_2', default=10)
-    parser.add_argument('--samples_3', default=0)
     parser.add_argument('--dim_1', default=128)
     parser.add_argument('--dim_2', default=128)
     parser.add_argument('--batch_size', default=512)
@@ -111,17 +96,6 @@ def parse_args():
     
     return args
 
-set_seeds(123)
-
-def select_model(args, sampler):
-    return {
-        "layer_infos" : filter(None, [
-            {"layer_name" : "node", "sampler" : sampler, "n_samples" : args.samples_1, "output_dim" : args.dim_1},
-            {"layer_name" : "node", "sampler" : sampler, "n_samples" : args.samples_2, "output_dim" : args.dim_2} if args.samples_2 != 0 else None,
-            {"layer_name" : "node", "sampler" : sampler, "n_samples" : args.samples_3, "output_dim" : args.dim_2} if args.samples_3 != 0 else None,
-        ]),
-    }
-
 if __name__ == "__main__":
     
     set_seeds(456)
@@ -142,22 +116,59 @@ if __name__ == "__main__":
     else:
         data_loader = NodeDataLoader(cache_path=cache_path)
     
-    adj_ = Variable(torch.LongTensor(data_loader.train_adj.astype(int)))
+    train_adj_ = Variable(torch.LongTensor(data_loader.train_adj.astype(int))).cuda()
+    val_adj_ = Variable(torch.LongTensor(data_loader.val_adj.astype(int))).cuda()
+    features_ = Variable(torch.FloatTensor(data_loader.features)).cuda()
     
-    params = {
+    # --
+    # Define model
+    
+    model = SupervisedGraphsage(**{
+        "input_dim"     : data_loader.features.shape[1],
         "num_classes"   : data_loader.num_classes,
-        "features"      : data_loader.features,
-        "adj"           : adj_,
-        "degrees"       : data_loader.degrees,
-        "model_size"    : args.model_size,
-        "sigmoid"       : args.sigmoid,
-        "identity_dim"  : args.identity_dim,
+        "layer_infos" : {
+            1 : {"sample_fn" : uniform_neighbor_sampler, "n_samples" : args.samples_1, "output_dim" : args.dim_1},
+            2 : {"sample_fn" : uniform_neighbor_sampler, "n_samples" : args.samples_2, "output_dim" : args.dim_2},
+        },
         "learning_rate" : args.learning_rate,
         "weight_decay"  : args.weight_decay,
-    }
-    sampler = UniformNeighborSampler(adj_)
-    params.update(select_model(args, sampler))
+    }).cuda()
     
-    model = SupervisedGraphsage(**params)
+    print(model)
+    
+    # --
+    # Train
+    
+    set_seeds(891)
+    
+    total_steps = 0
+    for epoch in range(args.epochs):
+        # Train
+        for iter_, train_batch in enumerate(data_loader.iterate(mode='train', shuffle=True)):
+            
+            ids = Variable(torch.LongTensor(train_batch['batch'])).cuda()
+            labels = Variable(torch.FloatTensor(train_batch['labels'])).cuda()
+            preds, loss = model.train_step(ids, features_, train_adj_, labels)
+        
+            if not total_steps % args.print_every:
+                train_f1 = calc_f1(to_numpy(labels), to_numpy(preds))
+                print({
+                    "epoch" : epoch,
+                    "iter" : iter_,
+                    "train_f1" : train_f1,
+                    # "val_f1" : val_f1,
+                })
+            
+            total_steps += 1
+        
+        # Evaluate
+        preds, labels = [], []
+        for eval_batch in data_loader.iterate(mode='val', shuffle=False):
+            ids = Variable(torch.LongTensor(eval_batch['batch'])).cuda()
+            preds.append(to_numpy(model(ids, features_, val_adj_)))
+            labels.append(eval_batch['labels'])
+        
+        print(calc_f1(np.vstack(labels), np.vstack(preds)))
+
 
 

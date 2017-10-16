@@ -27,7 +27,7 @@ SAGEInfo = namedtuple("SAGEInfo", [
 ])
 
 class SupervisedGraphsage(object):
-    def __init__(self, num_classes, placeholders, features, adj, degrees,
+    def __init__(self, num_classes, placeholders, features, adj,
             layer_infos, learning_rate, weight_decay, concat=True, aggregator_type="mean", 
             model_size="small", sigmoid=False, identity_dim=0, **kwargs):
         
@@ -103,12 +103,9 @@ class SupervisedGraphsage(object):
         self.loss = 0
         
         # regularization
-        for aggregator in aggregators:
-            for var in aggregator.vars.values():
+        for layer in aggregators + [fc]:
+            for var in layer.vars.values():
                 self.loss += weight_decay * tf.nn.l2_loss(var)
-        
-        for var in fc.vars.values():
-            self.loss += weight_decay * tf.nn.l2_loss(var)
        
         # classification
         if sigmoid:
