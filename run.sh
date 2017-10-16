@@ -11,7 +11,7 @@ python -m train \
     --multiclass
 
 python -m train \
-    --train-prefix ./data/reddit/ \
+    --data-path ./data/reddit/ \
     --aggregator mean \
     --multiclass
 
