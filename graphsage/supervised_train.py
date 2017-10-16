@@ -27,14 +27,15 @@ def set_seeds(seed=0):
 
 class UniformNeighborSampler(object):
     def __init__(self, adj, **kwargs):
-        print(adj)
         self.adj = adj
         
     def __call__(self, ids, num_samples):
+        print(ids.shape)
         adj_lists = tf.nn.embedding_lookup(self.adj, ids)
         adj_lists = tf.transpose(tf.random_shuffle(tf.transpose(adj_lists)))
+        adj_lists = tf.slice(adj_lists, [0,0], [-1, num_samples])
         print('adj_lists', adj_lists)
-        return tf.slice(adj_lists, [0,0], [-1, num_samples])
+        return adj_lists
 
 
 def calc_f1(y_true, y_pred):
