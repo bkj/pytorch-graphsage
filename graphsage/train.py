@@ -16,9 +16,10 @@ from sklearn import metrics
 
 import torch
 from torch.autograd import Variable
+from torch.nn import functional as F
 
 from graphsage.data_loader import NodeDataLoader
-from graphsage.pytorch_models import SupervisedGraphsage
+from graphsage.pytorch_models import GSSupervised
 
 # --
 # Helpers
@@ -123,13 +124,23 @@ if __name__ == "__main__":
     # --
     # Define model
     
-    model = SupervisedGraphsage(**{
+    model = GSSupervised(**{
         "input_dim"     : data_loader.features.shape[1],
         "num_classes"   : data_loader.num_classes,
-        "layer_infos" : {
-            1 : {"sample_fn" : uniform_neighbor_sampler, "n_samples" : args.samples_1, "output_dim" : args.dim_1},
-            2 : {"sample_fn" : uniform_neighbor_sampler, "n_samples" : args.samples_2, "output_dim" : args.dim_2},
-        },
+        "layer_specs" : [
+            {
+                "sample_fn" : uniform_neighbor_sampler,
+                "n_samples" : 25, 
+                "output_dim" : 128,
+                "activation" : F.relu,
+            },
+            {
+                "sample_fn" : uniform_neighbor_sampler,
+                "n_samples" : 10, 
+                "output_dim" : 128,
+                "activation" : lambda x: x,
+            },
+        ],
         "learning_rate" : args.learning_rate,
         "weight_decay"  : args.weight_decay,
     }).cuda()
@@ -142,6 +153,7 @@ if __name__ == "__main__":
     set_seeds(891)
     
     total_steps = 0
+    val_f1 = None
     for epoch in range(args.epochs):
         # Train
         for iter_, train_batch in enumerate(data_loader.iterate(mode='train', shuffle=True)):
@@ -156,7 +168,7 @@ if __name__ == "__main__":
                     "epoch" : epoch,
                     "iter" : iter_,
                     "train_f1" : train_f1,
-                    # "val_f1" : val_f1,
+                    "val_f1" : val_f1,
                 })
             
             total_steps += 1
@@ -168,7 +180,8 @@ if __name__ == "__main__":
             preds.append(to_numpy(model(ids, features_, val_adj_)))
             labels.append(eval_batch['labels'])
         
-        print(calc_f1(np.vstack(labels), np.vstack(preds)))
-
+        val_f1 = calc_f1(np.vstack(labels), np.vstack(preds))
+    
+    print({"val_f1" : val_f1})
 
 

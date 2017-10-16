@@ -17,6 +17,12 @@ python -m graphsage.supervised_train \
 # Pytorch 
 
 python -m graphsage.train \
+    --train_prefix ./data/reddit/reddit \
+    --model graphsage_mean \
+    --sigmoid
+
+
+python -m graphsage.train \
     --train_prefix ./data/example_data/ppi \
     --model graphsage_mean \
     --sigmoid

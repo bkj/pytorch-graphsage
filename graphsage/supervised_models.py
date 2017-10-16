@@ -7,17 +7,8 @@
 import tensorflow as tf
 from collections import namedtuple
 
-from graphsage.layers import Dense
-from graphsage.aggregators import MeanAggregator, MaxPoolingAggregator, \
-    MeanPoolingAggregator, SeqAggregator, GCNAggregator
-
-aggs = {
-    "mean" : MeanAggregator,
-    "seq" : SeqAggregator,
-    "meanpool" : MeanPoolingAggregator,
-    "maxpool" : MaxPoolingAggregator,
-    "gcn" : GCNAggregator,
-}
+from graphsage.layers import Layer, Dense
+from graphsage.inits import glorot, zeros
 
 SAGEInfo = namedtuple("SAGEInfo", [
     'layer_name',
@@ -25,6 +16,30 @@ SAGEInfo = namedtuple("SAGEInfo", [
     'num_samples',
     'output_dim',
 ])
+
+class MeanAggregator(Layer):
+    def __init__(self, input_dim, output_dim, act=tf.nn.relu, **kwargs):
+        
+        super(MeanAggregator, self).__init__(**kwargs)
+        
+        self.act = act
+        
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['neib_weights'] = glorot([input_dim, output_dim], name='neib_weights')
+            self.vars['self_weights'] = glorot([input_dim, output_dim], name='self_weights')
+        
+    def _call(self, inputs):
+        self_vecs, neib_vecs = inputs
+        
+        neib_means = tf.reduce_mean(neib_vecs, axis=1)
+        
+        output = tf.concat([
+            tf.matmul(self_vecs, self.vars["self_weights"]),
+            tf.matmul(neib_means, self.vars['neib_weights'])
+        ], axis=1)
+       
+        return self.act(output)
+
 
 class SupervisedGraphsage(object):
     def __init__(self, num_classes, placeholders, features, adj,
@@ -34,26 +49,14 @@ class SupervisedGraphsage(object):
         name = self.__class__.__name__.lower()
         self.name = name
         
-        self.aggregator  = aggs[aggregator_type]
+        self.aggregator  = MeanAggregator
         self.batch_size  = placeholders["batch_size"]
-        self.dropout     = placeholders["dropout"]
         self.layer_infos = layer_infos
         
-        dims = [(0 if features is None else features.shape[1]) + identity_dim]
-        dims.extend([layer_infos[i].output_dim for i in range(len(layer_infos))])
+        dims = [50, 128, 128]
         
-        node_embeddings = None
-        if identity_dim > 0:
-           node_embeddings = tf.get_variable("node_embeddings", [adj.get_shape().as_list()[0], identity_dim])
-        
-        if features is None: 
-            assert identity_dim == 0, "Must have a positive value for identity feature dimension if no input features given."
-            features = node_embeddings
-        else:
-            features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
-            if not node_embeddings is None:
-                features = tf.concat([node_embeddings, features], axis=1)
-        
+        features = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False)
+    
         # Sample
         samples = [placeholders["batch"]] # Node itself
         support_size = 1 # Node itself
@@ -63,38 +66,53 @@ class SupervisedGraphsage(object):
         for i, j in zip(inds, reversed(inds)):
             support_size *= layer_infos[j].num_samples
             support_sizes.append(support_size)
-            
-            # Sample neighbors
             node = layer_infos[j].neib_sampler(ids=samples[i], num_samples=layer_infos[j].num_samples)
-            
-            # Flatten
             node = tf.reshape(node, [support_size * self.batch_size,])
-            
-            # Append to list
             samples.append(node)
         
         # Aggregate
-        aggregated, aggregators = self.aggregate(
-            samples=samples, 
-            input_features=features,
-            dims=dims,
-            num_samples=[layer_info.num_samples for layer_info in self.layer_infos],
-            support_sizes=support_sizes,
-            concat=concat,
-            model_size=model_size
+        num_samples = [layer_info.num_samples for layer_info in self.layer_infos]
+        hidden = [tf.nn.embedding_lookup([features], node_samples) for node_samples in samples]
+        
+        agg2 = self.aggregator(
+            input_dim=dims[0],
+            output_dim=dims[1],
+            act=tf.nn.relu,
         )
+        agg1 = self.aggregator(
+            input_dim=2 * dims[1],
+            output_dim=dims[2],
+            act=lambda x: x,
+        )
+        
+        agg_size = [
+            self.batch_size * support_sizes[0],
+            num_samples[-1],
+            dims[0],
+        ]
+        print('agg_size', agg_size)
+        h1 = agg2((hidden[0], tf.reshape(hidden[1], agg_size)))
+        
+        agg_size = [
+            self.batch_size * support_sizes[1],
+            num_samples[-2],
+            dims[0],
+        ]
+        print('agg_size', agg_size)
+        h2 = agg2((hidden[1], tf.reshape(hidden[2], agg_size)))
+        
+        agg_size = [
+            self.batch_size * support_sizes[0],
+            num_samples[-1],
+            2 * dims[1],
+        ]
+        aggregated = agg1((h1, tf.reshape(h2, agg_size)))
         
         # Normalize
         normed_aggregated = tf.nn.l2_normalize(aggregated, 1)
         
         # Predict
-        dim_mult = 2 if concat else 1
-        fc = Dense(
-            dim_mult * dims[-1],
-            num_classes,
-            dropout=self.dropout,
-            act=lambda x : x,
-        )
+        fc = Dense(2 * dims[-1], num_classes)
         node_predictions = fc(normed_aggregated)
         
         # --
@@ -103,19 +121,14 @@ class SupervisedGraphsage(object):
         self.loss = 0
         
         # regularization
-        for layer in aggregators + [fc]:
+        for layer in [agg1, agg2, fc]:
             for var in layer.vars.values():
                 self.loss += weight_decay * tf.nn.l2_loss(var)
        
         # classification
-        if sigmoid:
-            self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=node_predictions,
-                    labels=placeholders['labels']))
-        else:
-            self.loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                    logits=node_predictions,
-                    labels=placeholders['labels']))
+        self.loss += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                logits=node_predictions,
+                labels=placeholders['labels']))
         
         # --
         # Gradients
@@ -129,45 +142,4 @@ class SupervisedGraphsage(object):
         # --
         # Predictions
         
-        if sigmoid:
-            self.preds = tf.nn.sigmoid(node_predictions)
-        else:
-            self.preds = tf.nn.softmax(node_predictions)
-    
-    def aggregate(self, samples, input_features, dims, num_samples, support_sizes, concat, name=None, model_size="small"):
-        
-        hidden = [tf.nn.embedding_lookup([input_features], node_samples) for node_samples in samples]
-        
-        aggregators = []
-        for layer in range(len(num_samples)):
-            if layer == len(num_samples) - 1:
-                act = lambda x: x
-            else:
-                act = tf.nn.relu
-            
-            dim_mult = 2 if concat and (layer != 0) else 1
-            
-            aggregator = self.aggregator(
-                input_dim=dim_mult * dims[layer],
-                output_dim=dims[layer+1],
-                act=act,
-                dropout=self.dropout,
-                name=name,
-                concat=concat,
-                model_size=model_size,
-            )
-            
-            aggregators.append(aggregator)
-            
-            next_hidden = []
-            for hop in range(len(num_samples) - layer):
-                neib_dims = [
-                    self.batch_size * support_sizes[hop],
-                    num_samples[len(num_samples) - hop - 1],
-                    dim_mult * dims[layer]
-                ]
-                next_hidden.append(aggregator((hidden[hop], tf.reshape(hidden[hop + 1], neib_dims))))
-            
-            hidden = next_hidden
-        
-        return hidden[0], aggregators
+        self.preds = tf.nn.sigmoid(node_predictions)

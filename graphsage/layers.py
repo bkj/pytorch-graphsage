@@ -41,15 +41,13 @@ class Layer(object):
 
 class Dense(Layer):
     """Dense layer."""
-    def __init__(self, input_dim, output_dim, dropout=0., act=tf.nn.relu, placeholders=None, bias=True,sparse_inputs=False, **kwargs):
+    def __init__(self, input_dim, output_dim, dropout=0., act=tf.nn.relu, placeholders=None, sparse_inputs=False, **kwargs):
         
         super(Dense, self).__init__(**kwargs)
         
         self.input_dim   = input_dim
         self.output_dim  = output_dim
-        self.dropout     = dropout
         self.act         = act
-        self.bias        = bias
         
         # helper variable for sparse dropout
         with tf.variable_scope(self.name + '_vars'):
@@ -61,14 +59,9 @@ class Dense(Layer):
                 regularizer=tf.contrib.layers.l2_regularizer(FLAGS.weight_decay)
             )
             
-            if self.bias:
-                self.vars['bias'] = zeros([output_dim], name='bias')
+            self.vars['bias'] = zeros([output_dim], name='bias')
                 
     def _call(self, x):
-        x = tf.nn.dropout(x, 1 - self.dropout)
         output = tf.matmul(x, self.vars['weights'])
-        
-        if self.bias:
-            output += self.vars['bias']
-        
-        return self.act(output)
+        output += self.vars['bias']
+        return output

@@ -30,11 +30,9 @@ class UniformNeighborSampler(object):
         self.adj = adj
         
     def __call__(self, ids, num_samples):
-        print(ids.shape)
         adj_lists = tf.nn.embedding_lookup(self.adj, ids)
         adj_lists = tf.transpose(tf.random_shuffle(tf.transpose(adj_lists)))
         adj_lists = tf.slice(adj_lists, [0,0], [-1, num_samples])
-        print('adj_lists', adj_lists)
         return adj_lists
 
 
