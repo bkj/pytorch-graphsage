@@ -49,7 +49,8 @@ class GSSupervised(nn.Module):
         # --
         # Setup samplers
         
-        self.sampler_fns = [partial(s['sample_fn'], n_samples=s['n_samples']) for s in layer_specs]
+        self.train_sample_fns = [partial(s['sample_fn'], n_samples=s['n_train_samples']) for s in layer_specs]
+        self.val_sample_fns = [partial(s['sample_fn'], n_samples=s['n_val_samples']) for s in layer_specs]
         
         # --
         # Define optimizer
@@ -58,20 +59,22 @@ class GSSupervised(nn.Module):
         self.lr = self.lr_scheduler(0.0)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
     
-    def _sample(self, ids, features, adj):
+    def _sample(self, ids, features, adj, train):
+        sample_fns = self.train_sample_fns if train else self.val_sample_fns
+        
         all_feats = [features[ids]]
-        for sampler_fn in self.sampler_fns:
+        for sampler_fn in sample_fns:
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
             all_feats.append(features[ids])
         
         return all_feats
     
-    def forward(self, ids, features, adj):
+    def forward(self, ids, features, adj, train=True):
         # Prep features
         features = self.prep(ids, features, adj)
         
         # Collect features for points in neighborhoods of ids
-        all_feats = self._sample(ids, features, adj)
+        all_feats = self._sample(ids, features, adj, train=train)
         
         # Sequentially apply layers, per original (little weird, IMO)
         # Each iteration reduces length of array by one

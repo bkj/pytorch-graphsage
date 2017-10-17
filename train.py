@@ -42,7 +42,7 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
 def evaluate(model, data_loader, mode='val', multiclass=True):
     preds, acts = [], []
     for (ids, targets, _) in data_loader.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, data_loader.features, data_loader.adj)))
+        preds.append(to_numpy(model(ids, data_loader.features, data_loader.adj, train=False)))
         acts.append(to_numpy(targets))
     
     acts = np.vstack(acts)
@@ -83,12 +83,14 @@ def parse_args():
     parser.add_argument('--aggregator-class', type=str, default='mean')
     parser.add_argument('--prep-class', type=str, default='identity')
     parser.add_argument('--multiclass', action='store_true')
-    parser.add_argument('--n-samples', type=str, default='25,10')
+    parser.add_argument('--n-train-samples', type=str, default='25,10')
+    parser.add_argument('--n-val-samples', type=str, default='25,10')
     parser.add_argument('--output-dims', type=str, default='128,128')
     
     # Logging
     parser.add_argument('--log-interval', default=10, type=int)
     parser.add_argument('--seed', default=123, type=int)
+    parser.add_argument('--show-test', action="store_true")
     
     # --
     # Validate args
@@ -127,31 +129,34 @@ if __name__ == "__main__":
     # --
     # Define model
     
-    n_samples = map(int, args.n_samples.split(','))
+    n_train_samples = map(int, args.n_train_samples.split(','))
+    n_val_samples = map(int, args.n_val_samples.split(','))
     output_dims = map(int, args.output_dims.split(','))
     model = GSSupervised(**{
-        "prep_class"       : prep_lookup[args.prep_class],
+        "prep_class" : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
-        "input_dim"        : data_loader.feature_dim,
-        "num_classes"      : data_loader.num_classes,
+        "input_dim" : data_loader.feature_dim,
+        "num_classes" : data_loader.num_classes,
         "layer_specs" : [
             {
                 "sample_fn" : uniform_neighbor_sampler,
-                "n_samples" : n_samples[0], 
+                "n_train_samples" : n_train_samples[0],
+                "n_val_samples" : n_val_samples[0],
                 "output_dim" : output_dims[0],
                 "activation" : F.relu,
             },
             {
                 "sample_fn" : uniform_neighbor_sampler,
-                "n_samples" : n_samples[1], 
+                "n_train_samples" : n_train_samples[1],
+                "n_val_samples" : n_val_samples[1],
                 "output_dim" : output_dims[1],
                 "activation" : lambda x: x,
             },
         ],
         "lr_init" : args.lr_init,
         "lr_schedule" : args.lr_schedule,
-        "weight_decay"  : args.weight_decay,
+        "weight_decay" : args.weight_decay,
     })
     
     if args.cuda:
@@ -186,7 +191,7 @@ if __name__ == "__main__":
             "train_f1" : calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass),
             "val_f1" : evaluate(model, data_loader, mode='val', multiclass=args.multiclass),
         })
-
-    
-    print({"test_f1" : evaluate(model, data_loader, mode='test', multiclass=args.multiclass)})
+        
+    if args.show_test:
+        print({"test_f1" : evaluate(model, data_loader, mode='test', multiclass=args.multiclass)})
 
