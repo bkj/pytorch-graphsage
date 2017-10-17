@@ -8,6 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import sys
 import time
 import sklearn
 import numpy as np
@@ -18,9 +19,10 @@ import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-from models import GSSupervised, aggregator_lookup
+from models import GSSupervised
 from helpers import set_seeds, to_numpy
 from data_loader import NodeDataLoader
+from nn_modules import aggregator_lookup, prep_lookup
 
 # --
 # Helpers
@@ -75,7 +77,8 @@ def parse_args():
     parser.add_argument('--weight-decay', default=0.0)
     
     # Architecture params
-    parser.add_argument('--aggregator', default='mean')
+    parser.add_argument('--aggregator-class', default='mean')
+    parser.add_argument('--prep-class', default='identity')
     parser.add_argument('--multiclass', action='store_true')
     parser.add_argument('--n-samples', default='25,10')
     parser.add_argument('--output-dims', default='128,128')
@@ -89,7 +92,8 @@ def parse_args():
     args = parser.parse_args()
     
     args.cuda = not args.no_cuda
-    assert args.aggregator in aggregator_lookup.keys(), 'Error: aggregator name unrecognized.'
+    assert args.prep_class in prep_lookup.keys(), 'Error: aggregator_class not recognized.'
+    assert args.aggregator_class in aggregator_lookup.keys(), 'Error: prep_class not recognized.'
     
     return args
 
@@ -122,7 +126,8 @@ if __name__ == "__main__":
     model = GSSupervised(**{
         "input_dim"   : data_loader.features.shape[1],
         "num_classes" : data_loader.num_classes,
-        "aggregator" : args.aggregator, 
+        "prep_class" : prep_lookup[args.prep_class],
+        "aggregator_class" : aggregator_lookup[args.aggregator_class],
         "layer_specs" : [
             {
                 "sample_fn" : uniform_neighbor_sampler,
