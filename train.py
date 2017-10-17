@@ -177,10 +177,10 @@ if __name__ == "__main__":
             if not iter_ % args.log_interval:
                 train_f1 = calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass)
                 print({
-                    "epoch"    : epoch,
-                    "iter"     : iter_,
+                    "epoch" : epoch,
+                    "iter" : iter_,
                     "train_f1" : train_f1,
-                    "val_f1"   : val_f1,
+                    "val_f1" : val_f1,
                 })
         
         # Evaluate

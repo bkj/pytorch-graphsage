@@ -2,6 +2,8 @@
 
 """
     data_loader.py
+    
+    
 """
 
 from __future__ import division
@@ -157,6 +159,7 @@ class NodeDataLoader(object):
         return adj
     
     def _make_label_vec(self, node):
+        """ force 2d array """
         label = self.class_map[node]
         if isinstance(label, list):
             return np.array(label)

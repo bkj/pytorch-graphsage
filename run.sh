@@ -7,7 +7,7 @@
 
 python -m train \
     --data-path ./data/example_data/ \
-    --aggregator-class lstm \
+    --aggregator-class mean \
     --multiclass
 
 python -m train \
