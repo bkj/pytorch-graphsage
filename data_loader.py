@@ -2,8 +2,6 @@
 
 """
     data_loader.py
-    
-    
 """
 
 from __future__ import division
@@ -14,6 +12,7 @@ import sys
 import h5py
 import cPickle
 import numpy as np
+import pandas as pd
 import ujson as json
 from networkx.readwrite import json_graph
 
@@ -22,115 +21,30 @@ from torch.autograd import Variable
 
 from helpers import to_numpy
 
-class NodeDataLoader(object):
-    def __init__(self, data_path=None, cache_path=None, batch_size=512, max_degree=25, 
-        multiclass=False, cuda=True):
+class DataLoader(object):
+
+    def __init__(self, data_path=None, cache_path=None, **kwargs):
         
         if data_path:
-            print("Building NodeDataLoader from data", file=sys.stderr)
-            self.__init(data_path, batch_size, max_degree, multiclass, cuda)
+            print("Building DataLoader from data", file=sys.stderr)
+            self._init(data_path, **kwargs)
         elif cache_path:
-            print("Loading NodeDataLoader from cache", file=sys.stderr)
-            self.__load(cache_path)
+            print("Loading DataLoader from cache", file=sys.stderr)
+            self._load(cache_path)
         else:
-            raise Exception('NodeDataLoader: either `data_path` or `cache_path` must != None')
+            raise Exception('DataLoader: either `data_path` or `cache_path` must != None')
     
-    def __init(self, data_path, batch_size, max_degree, multiclass, cuda):
-        G, features, id2idx, class_map = load_data(data_path)
-        
-        # Munge features
-        if features is not None:
-            features = np.vstack([features, np.zeros((features.shape[1],))])
-        
-        # Determine number of classes
-        if isinstance(list(class_map.values())[0], list):
-            self.num_classes = len(list(class_map.values())[0])
-        else:
-            self.num_classes = len(set(class_map.values()))
-        
-        # Construct adjacency matrices
-        self.train_adj = self.make_adjacency(G, id2idx, max_degree, train=True)
-        self.adj = self.make_adjacency(G, id2idx, max_degree, train=False)
-        
-        # Construct node lists
-        val_nodes   = [n for n in G.nodes() if G.node[n]['val']]
-        test_nodes  = [n for n in G.nodes() if G.node[n]['test']]
-        train_nodes = list(set(G.nodes()).difference(set(val_nodes + test_nodes)))
-        
-        self.nodes = {
-            "train" : np.array(train_nodes),
-            "val"   : np.array(val_nodes),
-            "test"  : np.array(test_nodes),
-        }
-        
-        self.batch_size  = batch_size
-        self.id2idx      = id2idx
-        self.class_map   = class_map
-        self.features    = features
-        self.feature_dim = features.shape[1]
-        self.multiclass  = multiclass
-        self.cuda        = cuda
-        self.__to_torch()
-        
-    def __to_torch(self):
+    def _to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))
         self.adj = Variable(torch.LongTensor(self.adj))
-        self.features = Variable(torch.FloatTensor(self.features))
+        self.feats = Variable(torch.FloatTensor(self.feats))
         
         if self.cuda:
             self.train_adj = self.train_adj.cuda()
             self.adj = self.adj.cuda()
-            self.features = self.features.cuda()
+            self.feats = self.feats.cuda()
     
-    def __load(self, cache_path):
-        f = h5py.File(cache_path)
-        
-        self.id2idx       = cPickle.loads(f['id2idx'].value)
-        self.batch_size   = f['batch_size'].value
-        self.class_map    = cPickle.loads(f['class_map'].value)
-        self.num_classes  = f['num_classes'].value
-        self.features     = f['features'].value
-        
-        self.feature_dim  = f['feature_dim'].value
-        self.multiclass   = f['multiclass'].value
-        self.cuda         = f['cuda'].value
-        
-        self.train_adj    = f['train_adj'].value
-        self.adj          = f['adj'].value
-        
-        self.nodes = {
-            "train" : cPickle.loads(f['nodes/train'].value),
-            "val"   : cPickle.loads(f['nodes/val'].value),
-            "test"  : cPickle.loads(f['nodes/test'].value),
-        }
-        
-        f.close()
-        
-        self.__to_torch()
-    
-    def save(self, outpath):
-        f = h5py.File(outpath)
-        
-        f['batch_size']  = self.batch_size
-        f['num_classes'] = self.num_classes        
-        f['id2idx']      = cPickle.dumps(self.id2idx)
-        f['class_map']   = cPickle.dumps(self.class_map)
-        f['features']    = to_numpy(self.features)
-        
-        f['feature_dim'] = self.feature_dim
-        f['multiclass']  = self.multiclass
-        f['cuda']        = self.cuda
-        
-        f['train_adj']   = to_numpy(self.train_adj)
-        f['adj']         = to_numpy(self.adj)
-        
-        f['nodes/train'] = cPickle.dumps(self.nodes['train'])
-        f['nodes/val']   = cPickle.dumps(self.nodes['val'])
-        f['nodes/test']  = cPickle.dumps(self.nodes['test'])
-        
-        f.close()
-    
-    def make_adjacency(self, G, id2idx, max_degree, train=True):
+    def _make_adjacency(self, G, id2idx, max_degree, train=True):
         adj = (np.zeros((len(id2idx) + 1, max_degree)) + len(id2idx)).astype(int)
         
         for node_id in G.nodes():
@@ -157,10 +71,95 @@ class NodeDataLoader(object):
             adj[id2idx[node_id], :] = neighbors
         
         return adj
+
+
+class NodeDataLoader(DataLoader):
+    def _init(self, data_path, **kwargs):
+        G, self.feats, self.id2idx, self.id2class, _ = load_data(data_path)
+        
+        # Construct adjacency matrices
+        self.train_adj = self._make_adjacency(G, self.id2idx, kwargs['max_degree'], train=True)
+        self.adj = self._make_adjacency(G, self.id2idx, kwargs['max_degree'], train=False)
+        
+        # Train/test split nodes and edges
+        val_nodes   = [n for n in G.nodes() if G.node[n]['val']]
+        test_nodes  = [n for n in G.nodes() if G.node[n]['test']]
+        train_nodes = list(set(G.nodes()).difference(set(val_nodes + test_nodes)))
+        
+        self.nodes = {
+            "train" : np.array(train_nodes),
+            "val"   : np.array(val_nodes),
+            "test"  : np.array(test_nodes),
+        }
+        
+        # Munge self.feats
+        if self.feats is not None:
+            self.feats = np.vstack([self.feats, np.zeros((self.feats.shape[1],))])
+        
+        # Determine number of classes
+        if isinstance(list(self.id2class.values())[0], list):
+            self.num_classes = len(list(self.id2class.values())[0])
+        else:
+            self.num_classes = len(set(self.id2class.values()))
+        
+        # Save properties
+        self.batch_size  = kwargs['batch_size']
+        self.feat_dim    = self.feats.shape[1]
+        self.multiclass  = kwargs['multiclass']
+        self.cuda        = kwargs['cuda']
+        self._to_torch()
+    
+    def _load(self, cache_path):
+        f = h5py.File(cache_path)
+        
+        self.feats       = f['feats'].value
+        self.id2idx      = cPickle.loads(f['id2idx'].value)
+        self.id2class    = cPickle.loads(f['id2class'].value)
+        
+        self.num_classes = f['num_classes'].value
+        self.batch_size  = f['batch_size'].value
+        self.feat_dim    = f['feat_dim'].value
+        self.multiclass  = f['multiclass'].value
+        self.cuda        = f['cuda'].value
+        
+        self.train_adj   = f['train_adj'].value
+        self.adj         = f['adj'].value
+        
+        self.nodes = {
+            "train" : cPickle.loads(f['nodes/train'].value),
+            "val"   : cPickle.loads(f['nodes/val'].value),
+            "test"  : cPickle.loads(f['nodes/test'].value),
+        }
+        
+        f.close()
+        
+        self._to_torch()
+    
+    def save(self, outpath):
+        f = h5py.File(outpath)
+        
+        f['feats']       = to_numpy(self.feats)
+        f['id2idx']      = cPickle.dumps(self.id2idx)
+        f['id2class']    = cPickle.dumps(self.id2class)
+        
+        f['batch_size']  = self.batch_size
+        f['num_classes'] = self.num_classes
+        f['feat_dim']    = self.feat_dim
+        f['multiclass']  = self.multiclass
+        f['cuda']        = self.cuda
+        
+        f['train_adj']   = to_numpy(self.train_adj)
+        f['adj']         = to_numpy(self.adj)
+        
+        f['nodes/train'] = cPickle.dumps(self.nodes['train'])
+        f['nodes/val']   = cPickle.dumps(self.nodes['val'])
+        f['nodes/test']  = cPickle.dumps(self.nodes['test'])
+        
+        f.close()
     
     def _make_label_vec(self, node):
         """ force 2d array """
-        label = self.class_map[node]
+        label = self.id2class[node]
         if isinstance(label, list):
             return np.array(label)
         else:
@@ -193,18 +192,107 @@ class NodeDataLoader(object):
             yield ids, targets, chunk_id / n_chunks
 
 
+class CPairDataLoader(DataLoader):
+    def _init(self, data_path, **kwargs):
+        G, self.feats, self.id2idx, _, context_pairs = load_data(data_path)
+        
+        # Construct adjacency matrices
+        self.train_adj = self._make_adjacency(G, self.id2idx, kwargs['max_degree'], train=True)
+        self.adj = self._make_adjacency(G, self.id2idx, kwargs['max_degree'], train=False)
+        
+        self.cpairs = {
+            "train" : context_pairs,
+            "val" : [e for e in G.edges() if G[e[0]][e[1]]['train_removed']]
+        }
+        
+        # Munge self.feats
+        if self.feats is not None:
+            self.feats = np.vstack([self.feats, np.zeros((self.feats.shape[1],))])
+                
+        # Save properties
+        self.batch_size  = kwargs['batch_size']
+        self.feat_dim    = self.feats.shape[1]
+        self.cuda        = kwargs['cuda']
+        self._to_torch()
+    
+    def _load(self, cache_path):
+        f = h5py.File(cache_path)
+        
+        self.feats        = f['feats'].value
+        self.id2idx       = cPickle.loads(f['id2idx'].value)
+        
+        self.batch_size  = f['batch_size'].value
+        self.feat_dim    = f['feat_dim'].value
+        self.cuda        = f['cuda'].value
+        
+        self.train_adj   = f['train_adj'].value
+        self.adj         = f['adj'].value
+        
+        self.cpairs = {
+            "train" : cPickle.loads(f['cpairs/train'].value),
+            "val"   : cPickle.loads(f['cpairs/val'].value),
+        }
+        
+        f.close()
+        
+        self._to_torch()
+    
+    def save(self, outpath):
+        f = h5py.File(outpath)
+        
+        f['feats']       = to_numpy(self.feats)
+        f['id2idx']      = cPickle.dumps(self.id2idx)
+        
+        f['batch_size']  = self.batch_size
+        f['feat_dim']    = self.feat_dim
+        f['cuda']        = self.cuda
+        
+        f['train_adj']   = to_numpy(self.train_adj)
+        f['adj']         = to_numpy(self.adj)
+        
+        f['cpairs/train'] = cPickle.dumps(self.cpairs['train'])
+        f['cpairs/val']   = cPickle.dumps(self.cpairs['val'])
+        
+        f.close()
+    
+    def iterate(self, mode, shuffle=False):
+        cpairs = self.cpairs[mode]
+        
+        if shuffle:
+            idx = np.random.permutation(len(cpairs)).astype(int)
+        else:
+            idx = np.arange(len(cpairs)).astype(int)
+        
+        n_chunks = idx.shape[0] // self.batch_size + 1
+        for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
+            # Get batch
+            ids1, ids2 = zip(*[(self.id2idx[n1], self.id2idx[n2]) for n1,n2 in cpairs[chunk]])
+            
+            # Convert to torch
+            ids1 = Variable(torch.LongTensor(ids1))
+            ids2 = Variable(torch.LongTensor(ids2))
+            
+            if self.cuda:
+                ids1, ids2 = ids1.cuda(), ids2.cuda()
+            
+            yield ids1, ids2, chunk_id / n_chunks
+
 
 def load_data(data_path, normalize=True):
     # --
     # Load
     
     G = json_graph.node_link_graph(json.load(open(os.path.join(data_path, "G.json"))))
-    class_map = json.load(open(os.path.join(data_path, "class_map.json")))
-    id_map = json.load(open(os.path.join(data_path, "id_map.json")))
+    id2class = json.load(open(os.path.join(data_path, "class_map.json")))
+    id2idx = json.load(open(os.path.join(data_path, "id_map.json")))
     
     feats = None
     if os.path.exists(os.path.join(data_path, "feats.npy")):
         feats = np.load(os.path.join(data_path, "feats.npy"))
+    
+    context_pairs = None
+    if os.path.exists(os.path.join(data_path, 'walks.txt')):
+        context_pairs = pd.read_csv(os.path.join(data_path, 'walks.txt'), header=None, sep='\t')
     
     # --
     # Format
@@ -214,14 +302,13 @@ def load_data(data_path, normalize=True):
     else:
         conversion = lambda n : str(n)
     
-    if isinstance(list(class_map.values())[0], list):
+    if isinstance(list(id2class.values())[0], list):
         lab_conversion = lambda n : n
     else:
         lab_conversion = lambda n : int(n)
     
-    
-    id_map    = {conversion(k):int(v) for k,v in id_map.items()}
-    class_map = {conversion(k):lab_conversion(v) for k,v in class_map.items()}
+    id2idx   = {conversion(k):int(v) for k,v in id2idx.items()}
+    id2class = {conversion(k):lab_conversion(v) for k,v in id2class.items()}
     
     # Remove edges not in training dataset
     for edge in G.edges():
@@ -230,13 +317,19 @@ def load_data(data_path, normalize=True):
         else:
             G[edge[0]][edge[1]]['train_removed'] = False
     
-    # Normalize features
-    if normalize and not feats is None:
+    # Normalize feats
+    if normalize and feats is not None:
         from sklearn.preprocessing import StandardScaler
-        train_ids = np.array([id_map[n] for n in G.nodes() if not G.node[n]['val'] and not G.node[n]['test']])
+        train_ids = np.array([id2idx[n] for n in G.nodes() if not G.node[n]['val'] and not G.node[n]['test']])
         train_feats = feats[train_ids]
         scaler = StandardScaler()
         scaler.fit(train_feats)
         feats = scaler.transform(feats)
     
-    return G, feats, id_map, class_map
+    # Format context_pairs (if they exist)
+    if context_pairs is not None:
+        context_pairs[0] = context_pairs[0].apply(conversion)
+        context_pairs[1] = context_pairs[1].apply(conversion)
+        context_pairs = np.array(context_pairs)
+    
+    return G, feats, id2idx, id2class, context_pairs

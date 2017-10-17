@@ -3,11 +3,15 @@
 # run.sh
 
 # --
-# Small
+# Supervised
 
 python -m train \
     --data-path ./data/reddit/ \
-    --aggregator-class attention \
-    --lr-init 0.005 \
-    --lr-schedule linear
+    --aggregator-class mean
 
+# --
+# Unsupervised
+
+python -m utrain \
+    --data-path ./data/reddit/ \
+    --aggregator-class mean

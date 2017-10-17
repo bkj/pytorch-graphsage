@@ -42,7 +42,7 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
 def evaluate(model, data_loader, mode='val', multiclass=True):
     preds, acts = [], []
     for (ids, targets, _) in data_loader.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, data_loader.features, data_loader.adj, train=False)))
+        preds.append(to_numpy(model(ids, data_loader.feats, data_loader.adj, train=False)))
         acts.append(to_numpy(targets))
     
     acts = np.vstack(acts)
@@ -69,11 +69,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     parser.add_argument('--data-path', type=str, required=True)
+    
+    # Training params
     parser.add_argument('--max-degree', type=int, default=128)
     parser.add_argument('--batch-size', type=int, default=512)
-    parser.add_argument('--no-cuda', action="store_true")
-    
-    # Optimization params
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr-init', type=float, default=0.01)
     parser.add_argument('--lr-schedule', type=str, default='constant')
@@ -91,6 +90,7 @@ def parse_args():
     parser.add_argument('--log-interval', default=10, type=int)
     parser.add_argument('--seed', default=123, type=int)
     parser.add_argument('--show-test', action="store_true")
+    parser.add_argument('--no-cuda', action="store_true")
     
     # --
     # Validate args
@@ -125,6 +125,7 @@ if __name__ == "__main__":
     else:
         data_loader = NodeDataLoader(cache_path=cache_path)
         data_loader.batch_size = args.batch_size
+        data_loader.multiclass = args.multiclass
     
     # --
     # Define model
@@ -136,7 +137,7 @@ if __name__ == "__main__":
         "prep_class" : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
-        "input_dim" : data_loader.feature_dim,
+        "input_dim" : data_loader.feat_dim,
         "num_classes" : data_loader.num_classes,
         "layer_specs" : [
             {
@@ -179,7 +180,7 @@ if __name__ == "__main__":
             model.set_progress((epoch + epoch_progress) / args.epochs)
             preds = model.train_step(
                 ids=ids, 
-                features=data_loader.features,
+                feats=data_loader.feats,
                 adj=data_loader.train_adj,
                 targets=targets,
                 loss_fn=loss_fn
