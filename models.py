@@ -83,7 +83,7 @@ class GSSupervised(nn.Module):
         out = F.normalize(all_feats[0], dim=1) # ??
         return self.fc(out)
     
-    def set_progress(progress):
+    def set_progress(self, progress):
         self.lr = self.lr_scheduler(progress)
         LRSchedule.set_lr(self.optimizer, self.lr)
     

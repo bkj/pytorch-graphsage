@@ -41,7 +41,7 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
 
 def evaluate(model, data_loader, mode='val', multiclass=True):
     preds, acts = [], []
-    for (ids, targets) in data_loader.iterate(mode=mode, shuffle=False):
+    for (ids, targets, _) in data_loader.iterate(mode=mode, shuffle=False):
         preds.append(to_numpy(model(ids, data_loader.features, data_loader.adj)))
         acts.append(to_numpy(targets))
     
@@ -169,7 +169,6 @@ if __name__ == "__main__":
     val_f1 = None
     for epoch in range(args.epochs):
         # Train
-        _ = model.train()
         for ids, targets, epoch_progress in data_loader.iterate(mode='train', shuffle=True):
             
             model.set_progress((epoch + epoch_progress) / args.epochs)
@@ -180,20 +179,14 @@ if __name__ == "__main__":
                 targets=targets,
                 loss_fn=loss_fn
             )
-            
-            if not iter_ % args.log_interval:
-                train_f1 = calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass)
-                print({
-                    "epoch" : epoch,
-                    "epoch_progress" : epoch_progress,
-                    "train_f1" : train_f1,
-                    "val_f1" : val_f1,
-                })
         
         # Evaluate
-        _ = model.eval()
-        val_f1 = evaluate(model, data_loader, mode='val', multiclass=args.multiclass)
+        print({
+            "epoch" : epoch,
+            "train_f1" : calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass),
+            "val_f1" : evaluate(model, data_loader, mode='val', multiclass=args.multiclass),
+        })
+
     
-    print({"val_f1" : val_f1})
     print({"test_f1" : evaluate(model, data_loader, mode='test', multiclass=args.multiclass)})
 

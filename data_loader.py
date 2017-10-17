@@ -174,11 +174,11 @@ class NodeDataLoader(object):
         else:
             idx = np.arange(len(nodes)).astype(int)
         
-        n_batches = idx.shape[0] // self.batch_size + 1
-        for i, idx_chunk in enumerate(np.array_split(idx, self.n_batches)):
+        n_chunks = idx.shape[0] // self.batch_size + 1
+        for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
             # Get batch
-            ids = [self.id2idx[n] for n in nodes[idx_chunk]]
-            targets = np.vstack([self._make_label_vec(node) for node in nodes[idx_chunk]])
+            ids = [self.id2idx[n] for n in nodes[chunk]]
+            targets = np.vstack([self._make_label_vec(node) for node in nodes[chunk]])
             
             # Convert to torch
             ids = Variable(torch.LongTensor(ids))
@@ -190,7 +190,7 @@ class NodeDataLoader(object):
             if self.cuda:
                 ids, targets = ids.cuda(), targets.cuda()
             
-            yield ids, targets, i / n_batches
+            yield ids, targets, chunk_id / n_chunks
 
 
 
