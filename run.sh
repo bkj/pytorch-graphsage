@@ -7,12 +7,12 @@
 
 python -m train \
     --data-path ./data/example_data/ \
-    --aggregator mean \
+    --aggregator-class lstm \
     --multiclass
 
 python -m train \
     --data-path ./data/reddit/ \
-    --aggregator mean \
+    --aggregator-class lstm \
     --multiclass
 
 
