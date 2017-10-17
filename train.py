@@ -7,24 +7,18 @@
 from __future__ import division
 from __future__ import print_function
 
-import os
 import sys
-import time
-import h5py
-import sklearn
-import numpy as np
 import argparse
-from sklearn import metrics
+import numpy as np
 
 import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
 from models import GSSupervised
+from problem import NodeProblem
 from helpers import set_seeds, to_numpy
-from data_loader import NodeDataLoader
 from nn_modules import aggregator_lookup, prep_lookup
-
 from lr import LRSchedule
 
 # --
@@ -40,28 +34,13 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
     return tmp[:,:n_samples]
 
 
-def evaluate(model, data_loader, mode='val', multiclass=True):
+def evaluate(model, problem, mode='val'):
     preds, acts = [], []
-    for (ids, targets, _) in data_loader.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, data_loader.feats, data_loader.adj, train=False)))
+    for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
+        preds.append(to_numpy(model(ids, problem.feats, problem.adj, train=False)))
         acts.append(to_numpy(targets))
     
-    acts = np.vstack(acts)
-    preds = np.vstack(preds)
-    return calc_f1(acts, preds, multiclass=args.multiclass)
-
-
-def calc_f1(y_true, y_pred, multiclass=True):
-    if multiclass:
-        y_pred = (y_pred > 0).astype(int)
-    else:
-        y_pred = np.argmax(y_pred, axis=1)
-    
-    return {
-        "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-        "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
-    }
-
+    return problem.metric_fn(np.vstack(acts), np.vstack(preds))
 
 # --
 # Args
@@ -82,7 +61,6 @@ def parse_args():
     # Architecture params
     parser.add_argument('--aggregator-class', type=str, default='mean')
     parser.add_argument('--prep-class', type=str, default='identity')
-    parser.add_argument('--multiclass', action='store_true')
     parser.add_argument('--n-train-samples', type=str, default='25,10')
     parser.add_argument('--n-val-samples', type=str, default='25,10')
     parser.add_argument('--output-dims', type=str, default='128,128')
@@ -111,7 +89,8 @@ if __name__ == "__main__":
     # --
     # IO
     
-    data_loader = NodeDataLoader(problem_path=args.problem_path, cuda=args.cuda)
+    print('loading problem: %s' % args.problem_path, file=sys.stderr)
+    problem = NodeProblem(problem_path=args.problem_path, cuda=args.cuda)
     
     # --
     # Define model
@@ -123,8 +102,8 @@ if __name__ == "__main__":
         "prep_class" : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
-        "input_dim" : data_loader.feats_dim,
-        "num_classes" : data_loader.num_classes,
+        "input_dim" : problem.feats_dim,
+        "n_classes" : problem.n_classes,
         "layer_specs" : [
             {
                 "sample_fn" : uniform_neighbor_sampler,
@@ -151,8 +130,6 @@ if __name__ == "__main__":
     
     print(model, file=sys.stderr)
     
-    loss_fn = F.multilabel_soft_margin_loss if args.multiclass else F.cross_entropy
-    
     # --
     # Train
     
@@ -161,24 +138,24 @@ if __name__ == "__main__":
     val_f1 = None
     for epoch in range(args.epochs):
         # Train
-        for ids, targets, epoch_progress in data_loader.iterate(mode='train', shuffle=True):
+        for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True):
             
             model.set_progress((epoch + epoch_progress) / args.epochs)
             preds = model.train_step(
                 ids=ids, 
-                feats=data_loader.feats,
-                adj=data_loader.train_adj,
+                feats=problem.feats,
+                adj=problem.train_adj,
                 targets=targets,
-                loss_fn=loss_fn
+                loss_fn=problem.loss_fn
             )
         
         # Evaluate
         print({
-            "epoch" : epoch,
-            "train_f1" : calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass),
-            "val_f1" : evaluate(model, data_loader, mode='val', multiclass=args.multiclass),
+            "epoch"    : epoch,
+            "train_f1" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
+            "val_f1"   : evaluate(model, problem, mode='val'),
         })
         
     if args.show_test:
-        print({"test_f1" : evaluate(model, data_loader, mode='test', multiclass=args.multiclass)})
+        print({"test_f1" : evaluate(model, problem, mode='test')})
 

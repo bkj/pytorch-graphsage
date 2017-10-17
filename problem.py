@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-    data_loader_2.py
+    problem.py
 """
 
 from __future__ import division
@@ -9,48 +9,87 @@ from __future__ import print_function
 
 import os
 import sys
-import cPickle
 import h5py
+import cPickle
 import numpy as np
-import ujson as json
+from sklearn import metrics
 
 import torch
 from torch.autograd import Variable
+from torch.nn import functional as F
 
-from helpers import to_numpy
+# --
+# Helper classes
 
-def read_problem(problem_path):
+class ProblemLosses:
+    @staticmethod
+    def multilabel_classification(preds, targets):
+        return F.multilabel_soft_margin_loss(preds, targets)
+    
+    @staticmethod
+    def classification(preds, targets):
+        return F.cross_entropy(preds, targets)
+
+
+class ProblemMetrics:
+    @staticmethod
+    def multilabel_classification(y_true, y_pred):
+        y_pred = (y_pred > 0).astype(int)
+        return {
+            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+        }
+    
+    @staticmethod
+    def classification(y_true, y_pred):
+        y_pred = np.argmax(y_pred, axis=1)
+        return {
+            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+        }
+
+# --
+# Helpers
+
+def load_problem(problem_path):
     f = h5py.File(problem_path)
     problem = {
-        "idx2fold"  : cPickle.loads(f['folds'].value),
+        "idx2class" : cPickle.loads(f['idx2class'].value),
+        "idx2fold"  : cPickle.loads(f['idx2fold'].value),
         "task"      : f['task'].value,
         "n_classes" : f['n_classes'].value,
         "feats"     : f['feats'].value,
-        "train_adj" : f['adj'].value,
+        "train_adj" : f['adj'].value, # !! Got flipped
         "adj"       : f['train_adj'].value,
     }
     f.close()
     return problem
 
-class NodeDataLoader(object):
+# --
+# Problem definition
+
+class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
         problem = load_problem(problem_path)
         
-        idx2fold  = problem['folds']
-        task      = problem['task']
-        n_classes = problem['n_classes']
-        feats     = problem['feats']
-        train_adj = problem['adj']
-        adj       = problem['train_adj']
+        self.idx2class = problem['idx2class']
+        self.task      = problem['task']
+        self.n_classes = problem['n_classes']
+        self.feats     = problem['feats']
+        self.train_adj = problem['train_adj']
+        self.adj       = problem['adj']
         
-        self.feats_dim = feats.shape[1]
+        self.feats_dim = self.feats.shape[1]
         self.cuda = cuda
         
+        self.loss_fn = getattr(ProblemLosses, self.task)
+        self.metric_fn = getattr(ProblemMetrics, self.task)
+        
         self.nodes = {
-            "train" : np.array([idx for idx,fold in meta['idx2fold'].items() if fold == 'train']),
-            "val"   : np.array([idx for idx,fold in meta['idx2fold'].items() if fold == 'val']),
-            "test"  : np.array([idx for idx,fold in meta['idx2fold'].items() if fold == 'test']),
+            "train" : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'train']),
+            "val"   : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'val']),
+            "test"  : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'test']),
         }
         
         self.__to_torch()
@@ -67,7 +106,7 @@ class NodeDataLoader(object):
     
     def _make_label_vec(self, node):
         """ force 2d array """
-        label = self.class_map[node]
+        label = self.idx2class[node]
         if isinstance(label, list):
             return np.array(label)
         else:
@@ -86,16 +125,15 @@ class NodeDataLoader(object):
             # Get batch
             mids    = nodes[chunk]
             targets = np.vstack([self._make_label_vec(mid) for mid in mids])
-            
             # Convert to torch
             mids = Variable(torch.LongTensor(mids))
             
-            if self.task == 'multiclass_classification':
+            if self.task == 'multilabel_classification':
                 targets = Variable(torch.FloatTensor(targets))
             elif self.task == 'classification':
                 targets = Variable(torch.LongTensor(targets))
             else:
-                raise Exception('NodeDataLoader: unknown task')
+                raise Exception('NodeDataLoader: unknown task: %s' % self.task)
             
             if self.cuda:
                 mids, targets = mids.cuda(), targets.cuda()

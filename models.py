@@ -19,7 +19,7 @@ from lr import LRSchedule
 # Model
 
 class GSSupervised(nn.Module):
-    def __init__(self, input_dim, num_classes, layer_specs, 
+    def __init__(self, input_dim, n_classes, layer_specs, 
         aggregator_class, prep_class, lr_init=0.01, weight_decay=0.0,
         lr_schedule='constant', epochs=10):
         super(GSSupervised, self).__init__()
@@ -44,7 +44,7 @@ class GSSupervised(nn.Module):
             input_dim = agg.output_dim # May not be the same as spec['output_dim']
         
         self.agg_layers = nn.Sequential(*agg_layers)
-        self.fc = nn.Linear(input_dim, num_classes, bias=True)
+        self.fc = nn.Linear(input_dim, n_classes, bias=True)
         
         # --
         # Setup samplers

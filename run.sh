@@ -5,9 +5,10 @@
 # --
 # Small
 
-python -m train \
-    --data-path ./data/reddit/ \
-    --aggregator-class attention \
-    --lr-init 0.005 \
-    --lr-schedule linear
+python ./train.py \
+    --problem-path ./data/reddit/problem.h5 \
+    --aggregator-class mean
 
+python ./train.py \
+    --problem-path ./data/example_data/problem.h5 \
+    --aggregator-class mean
