@@ -24,6 +24,8 @@ from helpers import set_seeds, to_numpy
 from data_loader import NodeDataLoader
 from nn_modules import aggregator_lookup, prep_lookup
 
+from lr import LRSchedule
+
 # --
 # Helpers
 
@@ -40,11 +42,11 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
 def evaluate(model, data_loader, mode='val', multiclass=True):
     preds, acts = [], []
     for (ids, targets) in data_loader.iterate(mode=mode, shuffle=False):
-        preds.append(model(ids, data_loader.features, data_loader.adj))
-        acts.append(targets)
+        preds.append(to_numpy(model(ids, data_loader.features, data_loader.adj)))
+        acts.append(to_numpy(targets))
     
-    acts = np.vstack(map(to_numpy, acts))
-    preds = np.vstack(map(to_numpy, preds))
+    acts = np.vstack(acts)
+    preds = np.vstack(preds)
     return calc_f1(acts, preds, multiclass=args.multiclass)
 
 
@@ -66,26 +68,27 @@ def calc_f1(y_true, y_pred, multiclass=True):
 def parse_args():
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--data-path', required=True)
-    parser.add_argument('--max-degree', default=128)
-    parser.add_argument('--batch-size', default=512)
+    parser.add_argument('--data-path', type=str, required=True)
+    parser.add_argument('--max-degree', type=int, default=128)
+    parser.add_argument('--batch-size', type=int, default=512)
     parser.add_argument('--no-cuda', action="store_true")
     
     # Optimization params
-    parser.add_argument('--epochs', default=10)
-    parser.add_argument('--learning-rate', default=0.01)
-    parser.add_argument('--weight-decay', default=0.0)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--lr-init', type=float, default=0.01)
+    parser.add_argument('--lr-schedule', type=str, default='constant')
+    parser.add_argument('--weight-decay', type=float, default=0.0)
     
     # Architecture params
-    parser.add_argument('--aggregator-class', default='mean')
-    parser.add_argument('--prep-class', default='identity')
+    parser.add_argument('--aggregator-class', type=str, default='mean')
+    parser.add_argument('--prep-class', type=str, default='identity')
     parser.add_argument('--multiclass', action='store_true')
-    parser.add_argument('--n-samples', default='25,10')
-    parser.add_argument('--output-dims', default='128,128')
+    parser.add_argument('--n-samples', type=str, default='25,10')
+    parser.add_argument('--output-dims', type=str, default='128,128')
     
     # Logging
-    parser.add_argument('--log-interval', default=10)
-    parser.add_argument('--seed', default=123)
+    parser.add_argument('--log-interval', default=10, type=int)
+    parser.add_argument('--seed', default=123, type=int)
     
     # --
     # Validate args
@@ -106,7 +109,7 @@ if __name__ == "__main__":
     # --
     # IO
     
-    cache_path = os.path.join(args.data_path, 'iterator-cache-%d-%d.h5' % (args.batch_size, args.max_degree))
+    cache_path = os.path.join(args.data_path, 'iterator-cache-%d.h5' % args.max_degree)
     if not os.path.exists(cache_path):
         data_loader = NodeDataLoader(
             data_path=args.data_path,
@@ -119,6 +122,7 @@ if __name__ == "__main__":
         data_loader.save(cache_path)
     else:
         data_loader = NodeDataLoader(cache_path=cache_path)
+        data_loader.batch_size = args.batch_size
     
     # --
     # Define model
@@ -145,7 +149,8 @@ if __name__ == "__main__":
                 "activation" : lambda x: x,
             },
         ],
-        "learning_rate" : args.learning_rate,
+        "lr_init" : args.lr_init,
+        "lr_schedule" : args.lr_schedule,
         "weight_decay"  : args.weight_decay,
     })
     
@@ -165,20 +170,22 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         # Train
         _ = model.train()
-        for iter_, (ids, targets) in enumerate(data_loader.iterate(mode='train', shuffle=True)):
+        for ids, targets, epoch_progress in data_loader.iterate(mode='train', shuffle=True):
+            
+            model.set_progress((epoch + epoch_progress) / args.epochs)
             preds = model.train_step(
                 ids=ids, 
                 features=data_loader.features,
                 adj=data_loader.train_adj,
                 targets=targets,
-                loss_fn=loss_fn,
+                loss_fn=loss_fn
             )
             
             if not iter_ % args.log_interval:
                 train_f1 = calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass)
                 print({
                     "epoch" : epoch,
-                    "iter" : iter_,
+                    "epoch_progress" : epoch_progress,
                     "train_f1" : train_f1,
                     "val_f1" : val_f1,
                 })

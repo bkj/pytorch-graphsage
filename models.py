@@ -13,16 +13,19 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from lr import LRSchedule
+
 # --
 # Model
 
 class GSSupervised(nn.Module):
     def __init__(self, input_dim, num_classes, layer_specs, 
-        aggregator_class, prep_class, learning_rate=0.01, weight_decay=0.0):
+        aggregator_class, prep_class, lr_init=0.01, weight_decay=0.0,
+        lr_schedule='constant', epochs=10):
         super(GSSupervised, self).__init__()
         
         # --
-        # Network
+        # Define network
         
         self.prep = prep_class(
             input_dim=input_dim,
@@ -44,14 +47,16 @@ class GSSupervised(nn.Module):
         self.fc = nn.Linear(input_dim, num_classes, bias=True)
         
         # --
-        # Samplers
+        # Setup samplers
         
         self.sampler_fns = [partial(s['sample_fn'], n_samples=s['n_samples']) for s in layer_specs]
         
         # --
-        # Optimizer
+        # Define optimizer
         
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.lr_scheduler = partial(getattr(LRSchedule, lr_schedule), lr_init=lr_init)
+        self.lr = self.lr_scheduler(0.0)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
     
     def _sample(self, ids, features, adj):
         all_feats = [features[ids]]
@@ -75,19 +80,27 @@ class GSSupervised(nn.Module):
         
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
-        # out = F.normalize(all_feats[0], dim=1) # ??
-        out = all_feats[0]
+        out = F.normalize(all_feats[0], dim=1) # ??
         return self.fc(out)
     
+    def set_progress(progress):
+        self.lr = self.lr_scheduler(progress)
+        LRSchedule.set_lr(self.optimizer, self.lr)
+    
     def train_step(self, ids, features, adj, targets, loss_fn):
+        
         self.optimizer.zero_grad()
+        
         # Predict
         preds = self(ids, features, adj)
+        
         # Make sure not (N X 1) dimensional
         targets = targets.squeeze()
+        
         # Compute loss
         loss = loss_fn(preds, targets)
-        # Update
+        
+        # Update parameters
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()

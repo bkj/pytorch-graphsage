@@ -23,7 +23,7 @@ from torch.autograd import Variable
 from helpers import to_numpy
 
 class NodeDataLoader(object):
-    def __init__(self, data_path=None, cache_path=None, batch_size=100, max_degree=25, 
+    def __init__(self, data_path=None, cache_path=None, batch_size=512, max_degree=25, 
         multiclass=False, cuda=True):
         
         if data_path:
@@ -55,7 +55,7 @@ class NodeDataLoader(object):
         # Construct node lists
         val_nodes   = [n for n in G.nodes() if G.node[n]['val']]
         test_nodes  = [n for n in G.nodes() if G.node[n]['test']]
-        train_nodes = set(G.nodes()).difference(set(val_nodes + test_nodes))
+        train_nodes = list(set(G.nodes()).difference(set(val_nodes + test_nodes)))
         
         self.nodes = {
             "train" : np.array(train_nodes),
@@ -174,7 +174,8 @@ class NodeDataLoader(object):
         else:
             idx = np.arange(len(nodes)).astype(int)
         
-        for idx_chunk in np.array_split(idx, idx.shape[0] // self.batch_size + 1):
+        n_batches = idx.shape[0] // self.batch_size + 1
+        for i, idx_chunk in enumerate(np.array_split(idx, self.n_batches)):
             # Get batch
             ids = [self.id2idx[n] for n in nodes[idx_chunk]]
             targets = np.vstack([self._make_label_vec(node) for node in nodes[idx_chunk]])
@@ -189,7 +190,7 @@ class NodeDataLoader(object):
             if self.cuda:
                 ids, targets = ids.cuda(), targets.cuda()
             
-            yield (ids, targets)
+            yield ids, targets, i / n_batches
 
 
 

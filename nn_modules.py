@@ -6,6 +6,7 @@
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 # --
 # Preprocessers
@@ -49,13 +50,10 @@ class MeanAggregator(nn.Module, AggregatorMixin):
         self.combine_fn = combine_fn
     
     def forward(self, x, neibs):
-        x_emb = self.fc_x(x)
-        
         agg_neib = neibs.view(x.size(0), -1, neibs.size(1)) # !! Careful
         agg_neib = agg_neib.mean(dim=1) # Careful
-        neib_emb = self.fc_neib(agg_neib)
         
-        out = self.combine_fn([x_emb, neib_emb])
+        out = self.combine_fn([self.fc_x(x), self.fc_neib(agg_neib)])
         if self.activation:
             out = self.activation(out)
         
@@ -78,14 +76,11 @@ class PoolAggregator(nn.Module, AggregatorMixin):
         self.combine_fn = combine_fn
     
     def forward(self, x, neibs):
-        x_emb = self.fc_x(x)
-        
         h_neibs = self.mlp(neibs)
         agg_neib = h_neibs.view(x.size(0), -1, h_neibs.size(1))
         agg_neib = self.pool_fn(agg_neib)
-        neib_emb = self.fc_neib(agg_neib)
         
-        out = self.combine_fn([x_emb, neib_emb])
+        out = self.combine_fn([self.fc_x(x), self.fc_neib(agg_neib)])
         if self.activation:
             out = self.activation(out)
         
@@ -142,9 +137,44 @@ class LSTMAggregator(nn.Module, AggregatorMixin):
         
         return out
 
+class AttentionAggregator(nn.Module, AggregatorMixin):
+    def __init__(self, input_dim, output_dim, activation, hidden_dim=32, combine_fn=lambda x: torch.cat(x, dim=1)):
+        super(AttentionAggregator, self).__init__()
+        
+        self.att = nn.Sequential(*[
+            nn.Linear(input_dim, hidden_dim, bias=False),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim, bias=False),
+        ])
+        self.fc_x = nn.Linear(input_dim, output_dim, bias=False)
+        self.fc_neib = nn.Linear(input_dim, output_dim, bias=False)
+        
+        self.output_dim_ = output_dim
+        self.activation = activation
+        self.combine_fn = combine_fn
+    
+    def forward(self, x, neibs):
+        # Compute attention weights
+        neib_att = self.att(neibs)
+        x_att    = self.att(x)
+        neib_att = neib_att.view(x.size(0), -1, neib_att.size(1))
+        x_att    = x_att.view(x_att.size(0), x_att.size(1), 1)
+        ws       = F.softmax(torch.bmm(neib_att, x_att).squeeze())
+        
+        # Weighted average of neighbors
+        agg_neib = neibs.view(x.size(0), -1, neibs.size(1))
+        agg_neib = torch.sum(agg_neib * ws.unsqueeze(-1), dim=1)
+        
+        out = self.combine_fn([self.fc_x(x), self.fc_neib(agg_neib)])
+        if self.activation:
+            out = self.activation(out)
+        
+        return out
+
 aggregator_lookup = {
     "mean" : MeanAggregator,
     "max_pool" : MaxPoolAggregator,
     "mean_pool" : MeanPoolAggregator,
     "lstm" : LSTMAggregator,
+    "attention" : AttentionAggregator,
 }
