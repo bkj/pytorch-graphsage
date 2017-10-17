@@ -16,13 +16,13 @@ def load_data(prefix, normalize=True):
     # --
     # Load
     
-    G = json_graph.node_link_graph(json.load(open(prefix + "-G.json")))
-    class_map = json.load(open(prefix + "-class_map.json"))
-    id_map = json.load(open(prefix + "-id_map.json"))
+    G = json_graph.node_link_graph(json.load(open(os.path.join(prefix, "G.json"))))
+    class_map = json.load(open(os.path.join(prefix, "class_map.json")))
+    id_map = json.load(open(os.path.join(prefix, "id_map.json")))
     
     feats = None
-    if os.path.exists(prefix + "-feats.npy"):
-        feats = np.load(prefix + "-feats.npy")
+    if os.path.exists(os.path.join(prefix, "feats.npy")):
+        feats = np.load(os.path.join(prefix, "feats.npy"))
     
     # --
     # Format

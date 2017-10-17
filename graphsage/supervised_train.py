@@ -27,13 +27,11 @@ def set_seeds(seed=0):
 
 class UniformNeighborSampler(object):
     def __init__(self, adj, **kwargs):
-        print(adj)
         self.adj = adj
         
     def __call__(self, ids, num_samples):
         adj_lists = tf.nn.embedding_lookup(self.adj, ids)
         adj_lists = tf.transpose(tf.random_shuffle(tf.transpose(adj_lists)))
-        print('adj_lists', adj_lists)
         return tf.slice(adj_lists, [0,0], [-1, num_samples])
 
 
@@ -169,7 +167,7 @@ if __name__ == "__main__":
     # --
     # IO
     
-    cache_path = '%s-%d-%d-iterator-cache.h5' % (FLAGS.train_prefix, FLAGS.batch_size, FLAGS.max_degree)
+    cache_path = os.path.join(FLAGS.train_prefix, 'iterator-cache-%d-%d.h5' % (FLAGS.batch_size, FLAGS.max_degree))
     if not os.path.exists(cache_path):
         data_loader = NodeDataLoader(
             data_path=FLAGS.train_prefix,
