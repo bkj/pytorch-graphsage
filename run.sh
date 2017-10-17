@@ -12,7 +12,6 @@ python -m train \
 
 python -m train \
     --data-path ./data/reddit/ \
-    --aggregator-class lstm \
-    --multiclass
+    --aggregator-class mean
 
 

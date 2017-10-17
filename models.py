@@ -22,7 +22,7 @@ class GSSupervised(nn.Module):
         super(GSSupervised, self).__init__()
         
         # --
-        # Define network
+        # Network
         
         self.prep = prep_class(
             input_dim=input_dim,
@@ -44,7 +44,7 @@ class GSSupervised(nn.Module):
         self.fc = nn.Linear(input_dim, num_classes, bias=True)
         
         # --
-        # Define samplers
+        # Samplers
         
         self.sampler_fns = [partial(s['sample_fn'], n_samples=s['n_samples']) for s in layer_specs]
         
@@ -62,9 +62,10 @@ class GSSupervised(nn.Module):
         return all_feats
     
     def forward(self, ids, features, adj):
+        # Prep features
         features = self.prep(ids, features, adj)
-        # Collect features for points in neighborhoods of ids
         
+        # Collect features for points in neighborhoods of ids
         all_feats = self._sample(ids, features, adj)
         
         # Sequentially apply layers, per original (little weird, IMO)
@@ -74,13 +75,19 @@ class GSSupervised(nn.Module):
         
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
-        out = F.normalize(all_feats[0], dim=1)
+        # out = F.normalize(all_feats[0], dim=1) # ??
+        out = all_feats[0]
         return self.fc(out)
     
-    def train_step(self, ids, features, adj, labels):
+    def train_step(self, ids, features, adj, targets, loss_fn):
         self.optimizer.zero_grad()
+        # Predict
         preds = self(ids, features, adj)
-        loss = F.multilabel_soft_margin_loss(preds, labels)
+        # Make sure not (N X 1) dimensional
+        targets = targets.squeeze()
+        # Compute loss
+        loss = loss_fn(preds, targets)
+        # Update
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-    supervised_train.py
+    train.py
 """
 
 from __future__ import division
@@ -38,21 +38,21 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
 
 
 def evaluate(model, data_loader, mode='val', multiclass=True):
-    preds, labels = [], []
-    for eval_batch in data_loader.iterate(mode='val', shuffle=False):
-        ids = Variable(torch.LongTensor(eval_batch['batch'])).cuda()
-        preds.append(to_numpy(model(ids, features_, val_adj_)))
-        labels.append(eval_batch['labels'])
+    preds, acts = [], []
+    for (ids, targets) in data_loader.iterate(mode=mode, shuffle=False):
+        preds.append(model(ids, data_loader.features, data_loader.adj))
+        acts.append(targets)
     
-    return calc_f1(np.vstack(labels), np.vstack(preds), multiclass=args.multiclass)
+    acts = np.vstack(map(to_numpy, acts))
+    preds = np.vstack(map(to_numpy, preds))
+    return calc_f1(acts, preds, multiclass=args.multiclass)
 
 
 def calc_f1(y_true, y_pred, multiclass=True):
-    if not multiclass:
-        y_true = np.argmax(y_true, axis=1)
-        y_pred = np.argmax(y_pred, axis=1)
-    else:
+    if multiclass:
         y_pred = (y_pred > 0).astype(int)
+    else:
+        y_pred = np.argmax(y_pred, axis=1)
     
     return {
         "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
@@ -84,7 +84,8 @@ def parse_args():
     parser.add_argument('--output-dims', default='128,128')
     
     # Logging
-    parser.add_argument('--log-interval', default=5)
+    parser.add_argument('--log-interval', default=10)
+    parser.add_argument('--seed', default=123)
     
     # --
     # Validate args
@@ -98,9 +99,9 @@ def parse_args():
     return args
 
 if __name__ == "__main__":
-    
-    set_seeds(456)
     args = parse_args()
+    
+    set_seeds(args.seed)
     
     # --
     # IO
@@ -111,6 +112,8 @@ if __name__ == "__main__":
             data_path=args.data_path,
             batch_size=args.batch_size,
             max_degree=args.max_degree,
+            multiclass=args.multiclass,
+            cuda=args.cuda,
         )
         
         data_loader.save(cache_path)
@@ -122,12 +125,12 @@ if __name__ == "__main__":
     
     n_samples = map(int, args.n_samples.split(','))
     output_dims = map(int, args.output_dims.split(','))
-    
     model = GSSupervised(**{
-        "input_dim"   : data_loader.features.shape[1],
-        "num_classes" : data_loader.num_classes,
-        "prep_class" : prep_lookup[args.prep_class],
+        "prep_class"       : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
+        
+        "input_dim"        : data_loader.feature_dim,
+        "num_classes"      : data_loader.num_classes,
         "layer_specs" : [
             {
                 "sample_fn" : uniform_neighbor_sampler,
@@ -146,51 +149,44 @@ if __name__ == "__main__":
         "weight_decay"  : args.weight_decay,
     })
     
+    if args.cuda:
+        model = model.cuda()
+    
     print(model, file=sys.stderr)
     
-    features_  = Variable(torch.FloatTensor(data_loader.features))
-    train_adj_ = Variable(torch.LongTensor(data_loader.train_adj.astype(int)))
-    val_adj_   = Variable(torch.LongTensor(data_loader.val_adj.astype(int)))
-    
-    if args.cuda:
-        model      = model.cuda()
-        train_adj_ = train_adj_.cuda()
-        val_adj_   = val_adj_.cuda()
-        features_  = features_.cuda()
+    loss_fn = F.multilabel_soft_margin_loss if args.multiclass else F.cross_entropy
     
     # --
     # Train
     
-    set_seeds(891)
+    set_seeds(args.seed ** 2)
     
     val_f1 = None
     for epoch in range(args.epochs):
         # Train
         _ = model.train()
-        for iter_, train_batch in enumerate(data_loader.iterate(mode='train', shuffle=True)):
-            
-            ids = Variable(torch.LongTensor(train_batch['batch']))
-            labels = Variable(torch.FloatTensor(train_batch['labels']))
-            
-            if args.cuda:
-                ids, labels = ids.cuda(), labels.cuda()
-            
-            preds = model.train_step(ids, features_, train_adj_, labels)
+        for iter_, (ids, targets) in enumerate(data_loader.iterate(mode='train', shuffle=True)):
+            preds = model.train_step(
+                ids=ids, 
+                features=data_loader.features,
+                adj=data_loader.train_adj,
+                targets=targets,
+                loss_fn=loss_fn,
+            )
             
             if not iter_ % args.log_interval:
-                train_f1 = calc_f1(to_numpy(labels), to_numpy(preds), multiclass=args.multiclass)
+                train_f1 = calc_f1(to_numpy(targets), to_numpy(preds), multiclass=args.multiclass)
                 print({
                     "epoch"    : epoch,
                     "iter"     : iter_,
                     "train_f1" : train_f1,
                     "val_f1"   : val_f1,
                 })
-            
         
         # Evaluate
         _ = model.eval()
         val_f1 = evaluate(model, data_loader, mode='val', multiclass=args.multiclass)
     
     print({"val_f1" : val_f1})
-
+    print({"test_f1" : evaluate(model, data_loader, mode='test', multiclass=args.multiclass)})
 
