@@ -59,22 +59,22 @@ class GSSupervised(nn.Module):
         self.lr = self.lr_scheduler(0.0)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
     
-    def _sample(self, ids, features, adj, train):
+    def _sample(self, ids, feats, adj, train):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        all_feats = [features[ids]]
+        all_feats = [feats[ids]]
         for sampler_fn in sample_fns:
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
-            all_feats.append(features[ids])
+            all_feats.append(feats[ids])
         
         return all_feats
     
-    def forward(self, ids, features, adj, train=True):
-        # Prep features
-        features = self.prep(ids, features, adj)
+    def forward(self, ids, feats, adj, train=True):
+        # Prep feats
+        feats = self.prep(ids, feats, adj)
         
-        # Collect features for points in neighborhoods of ids
-        all_feats = self._sample(ids, features, adj, train=train)
+        # Collect feats for points in neighborhoods of ids
+        all_feats = self._sample(ids, feats, adj, train=train)
         
         # Sequentially apply layers, per original (little weird, IMO)
         # Each iteration reduces length of array by one
@@ -90,12 +90,12 @@ class GSSupervised(nn.Module):
         self.lr = self.lr_scheduler(progress)
         LRSchedule.set_lr(self.optimizer, self.lr)
     
-    def train_step(self, ids, features, adj, targets, loss_fn):
+    def train_step(self, ids, feats, adj, targets, loss_fn):
         
         self.optimizer.zero_grad()
         
         # Predict
-        preds = self(ids, features, adj)
+        preds = self(ids, feats, adj)
         
         # Make sure not (N X 1) dimensional
         targets = targets.squeeze()

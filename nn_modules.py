@@ -21,8 +21,8 @@ class IdentityPrep(nn.Module):
     def output_dim(self):
         return self.input_dim
     
-    def forward(self, ids, features, adj):
-        return features
+    def forward(self, ids, feats, adj):
+        return feats
 
 prep_lookup = {
     "identity" : IdentityPrep,
