@@ -32,7 +32,6 @@ def parse_fold(x):
         return 'train'
 
 
-
 def make_adjacency(G, folds, max_degree, train=True):
     
     all_nodes = np.array(G.nodes())
@@ -65,26 +64,26 @@ def make_adjacency(G, folds, max_degree, train=True):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--inpath', type=str, default='./data/reddit/')
+    parser.add_argument('--outpath', type=str)
     parser.add_argument('--max-degree', type=int, default=128)
     parser.add_argument('--task', type=str, default='classification')
-    args = parser.parse_args()
-    
-    assert args.task in ['classification', 'multilabel_classification']
-    
-    return args
 
+    args = parser.parse_args()
+    assert args.task in ['classification', 'multilabel_classification'], 'unknown args.task'
+    if not args.outpath:
+        args.outpath = os.path.join(args.inpath, 'problem.h5')
+    return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    outpath = os.path.join(args.inpath, 'problem.h5')
     
-    if os.path.exists(outpath):
+    if os.path.exists(args.outpath):
         print('backing up old problem.h5', file=sys.stderr)
-        _ = shutil.move(outpath, outpath + '.bak')
+        _ = shutil.move(args.outpath, args.outpath + '.bak')
     
     
-    print('loading', file=sys.stderr)
+    print('loading <- %s' % args.inpath, file=sys.stderr)
     id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
     id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
     feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
@@ -92,8 +91,8 @@ if __name__ == "__main__":
     
     
     print('reordering')
-    feats   = np.vstack([feats[id2idx[id]] for id in G.nodes()])
-    targets = np.vstack([id2target[id] for id in G.nodes()])
+    feats   = np.vstack([feats[id2idx[str(id)]] for id in G.nodes()])
+    targets = np.vstack([id2target[str(id)] for id in G.nodes()])
     folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
     G       = nx.convert_node_labels_to_integers(G)
     
@@ -116,7 +115,7 @@ if __name__ == "__main__":
         n_classes = targets.shape[1]
     
     
-    print('saving', file=sys.stderr)
+    print('saving -> %s' % args.outpath, file=sys.stderr)
     problem = {
         "task"      : args.task,
         "n_classes" : n_classes,
@@ -127,7 +126,7 @@ if __name__ == "__main__":
         "folds"     : folds,
     }
 
-    f = h5py.File(outpath)
+    f = h5py.File(args.outpath)
     for k,v in problem.items():
         f[k] = v
 
