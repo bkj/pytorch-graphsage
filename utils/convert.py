@@ -23,7 +23,7 @@ from sklearn.preprocessing import StandardScaler
 # --
 # Helpers
 
-def parse_node(x):
+def parse_fold(x):
     if x['test']:
         return 'test'
     elif x['val']:
@@ -32,45 +32,39 @@ def parse_node(x):
         return 'train'
 
 
-def normalize(feats, idx2fold):
-    train_ids = np.array([k for k,v in idx2fold.items() if v == 'train'])
-    train_feats = feats[train_ids]
-    scaler = StandardScaler()
-    scaler.fit(train_feats)
-    return scaler.transform(feats)
 
-
-def make_adjacency(G, idx2fold, max_degree, train=True):
+def make_adjacency(G, folds, max_degree, train=True):
     
-    n_nodes = max(idx2fold.keys()) + 1
-    adj = np.zeros((n_nodes, max_degree))
-    adj += n_nodes # Initialize w/ OOB entries
-    adj = adj.astype(int)
+    all_nodes = np.array(G.nodes())
     
-    all_nodes = G.nodes()
+    # Initialize w/ links to a dummy node
+    n_nodes = len(all_nodes)
+    adj = (np.zeros((n_nodes + 1, max_degree)) + n_nodes).astype(int)
+    
     if train:
-        all_nodes = filter(lambda x: idx2fold[x] != 'train', all_nodes)
+        # only look at nodes in training set
+        all_nodes = all_nodes[folds == 'train']
     
     for node in all_nodes:
-        neighbors = G.neighbors(node)
+        neibs = np.array(G.neighbors(node))
         
         if train:
-            neighbors = filter(lambda x: idx2fold[x] != 'train', neighbors)
+            neibs = neibs[folds[neibs] == 'train']
         
-        if len(neighbors) > 0:
-            if len(neighbors) > max_degree:
-                neighbors = np.random.choice(neighbors, max_degree, replace=False)
-            elif len(neighbors) < max_degree:
-                neighbors = np.random.choice(neighbors, max_degree, replace=True)
+        if len(neibs) > 0:
+            if len(neibs) > max_degree:
+                neibs = np.random.choice(neibs, max_degree, replace=False)
+            elif len(neibs) < max_degree:
+                neibs = np.random.choice(neibs, max_degree, replace=True)
             
-            adj[node, :] = np.array(neighbors)
+            adj[node, :] = neibs
     
     return adj
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--inpath', type=str, required=True)
+    parser.add_argument('--inpath', type=str, default='./data/reddit/')
     parser.add_argument('--max-degree', type=int, default=128)
     parser.add_argument('--task', type=str, default='classification')
     args = parser.parse_args()
@@ -80,8 +74,8 @@ def parse_args():
     return args
 
 
+
 if __name__ == "__main__":
-    
     args = parse_args()
     outpath = os.path.join(args.inpath, 'problem.h5')
     
@@ -89,44 +83,50 @@ if __name__ == "__main__":
         print('backing up old problem.h5', file=sys.stderr)
         _ = shutil.move(outpath, outpath + '.bak')
     
+    
     print('loading', file=sys.stderr)
-    class_map = json.load(open(os.path.join(args.inpath, 'class_map.json')))
-    id2idx = json.load(open(os.path.join(args.inpath, 'id_map.json')))
+    id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
+    id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
+    feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
+    G         = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
     
-    print('making graph', file=sys.stderr)
-    G = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
-    G = nx.relabel_nodes(G, id2idx)
     
-    print('making lists', file=sys.stderr)
-    idx2id = dict([(v, k) for k,v in id2idx.items()])
-    idx2class = dict([(id2idx[k], v) for k,v in class_map.items()])
-    idx2fold = dict(map(lambda x: (x, parse_node(G.node[x])), G.nodes()))
+    print('reordering')
+    feats   = np.vstack([feats[id2idx[id]] for id in G.nodes()])
+    targets = np.vstack([id2target[id] for id in G.nodes()])
+    folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
+    G       = nx.convert_node_labels_to_integers(G)
+    
     
     print('normalizing feats', file=sys.stderr)
-    feats = normalize(np.load(os.path.join(args.inpath, 'feats.npy')), idx2fold)
+    scaler = StandardScaler().fit(feats[folds == 'train'])
+    feats = scaler.transform(feats)
+    
     
     print('making adjacency lists', file=sys.stderr)
-    adj = make_adjacency(G, idx2fold, args.max_degree, train=False)
-    train_adj = make_adjacency(G, idx2fold, args.max_degree, train=True)
+    adj = make_adjacency(G, folds, args.max_degree, train=False) # Adds dummy node
+    train_adj = make_adjacency(G, folds, args.max_degree, train=True) # Adds dummy node
+    feats = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
+    
     
     print('finishing up', file=sys.stderr)
     if args.task == 'classification':
-        n_classes = len(set(idx2class.values()))
+        n_classes = len(np.unique(targets))
     elif args.task == 'multilabel_classification':
-        n_classes = len(idx2class[0])
+        n_classes = targets.shape[1]
+    
     
     print('saving', file=sys.stderr)
     problem = {
-        "idx2id"    : cPickle.dumps(idx2id),
-        "idx2class" : cPickle.dumps(idx2class),
-        "idx2fold"  : cPickle.dumps(idx2fold),
         "task"      : args.task,
         "n_classes" : n_classes,
         "feats"     : feats,
-        "train_adj" : adj,
-        "adj"       : train_adj,
+        "train_adj" : train_adj,
+        "adj"       : adj,
+        "targets"   : targets,
+        "folds"     : folds,
     }
-    
+
     f = h5py.File(outpath)
     for k,v in problem.items():
         f[k] = v

@@ -48,22 +48,6 @@ class ProblemMetrics:
             "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
         }
 
-# --
-# Helpers
-
-def load_problem(problem_path):
-    f = h5py.File(problem_path)
-    problem = {
-        "idx2class" : cPickle.loads(f['idx2class'].value),
-        "idx2fold"  : cPickle.loads(f['idx2fold'].value),
-        "task"      : f['task'].value,
-        "n_classes" : f['n_classes'].value,
-        "feats"     : f['feats'].value,
-        "train_adj" : f['adj'].value, # !! Got flipped
-        "adj"       : f['train_adj'].value,
-    }
-    f.close()
-    return problem
 
 # --
 # Problem definition
@@ -71,29 +55,29 @@ def load_problem(problem_path):
 class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
-        problem = load_problem(problem_path)
-        
-        self.idx2class = problem['idx2class']
-        self.task      = problem['task']
-        self.n_classes = problem['n_classes']
-        self.feats     = problem['feats']
-        self.train_adj = problem['train_adj']
-        self.adj       = problem['adj']
+        f = h5py.File(problem_path)
+        self.task      = f['task'].value
+        self.n_classes = f['n_classes'].value
+        self.feats     = f['feats'].value
+        self.folds     = f['folds'].value
+        self.targets   = f['targets'].value
+        self.adj       = f['adj'].value
+        self.train_adj = f['train_adj'].value
+        f.close()
         
         self.feats_dim = self.feats.shape[1]
-        self.cuda = cuda
+        self.cuda      = cuda
+        self.__to_torch()
+        
+        self.nodes = {
+            "train" : np.where(self.folds == 'train')[0],
+            "val"   : np.where(self.folds == 'val')[0],
+            "test"  : np.where(self.folds == 'test')[0],
+        }
         
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
-        self.nodes = {
-            "train" : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'train']),
-            "val"   : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'val']),
-            "test"  : np.array([idx for idx,fold in problem['idx2fold'].items() if fold == 'test']),
-        }
-        
-        self.__to_torch()
-    
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))
         self.adj = Variable(torch.LongTensor(self.adj))
@@ -104,27 +88,20 @@ class NodeProblem(object):
             self.adj = self.adj.cuda()
             self.feats = self.feats.cuda()
     
-    def _make_label_vec(self, node):
-        """ force 2d array """
-        label = self.idx2class[node]
-        if isinstance(label, list):
-            return np.array(label)
-        else:
-            return np.array([label])
-    
     def iterate(self, mode, batch_size=512, shuffle=False):
         nodes = self.nodes[mode]
         
+        idx = np.arange(nodes.shape[0])
         if shuffle:
-            idx = np.random.permutation(nodes.shape[0])
-        else:
-            idx = np.arange(nodes.shape[0])
+            idx = np.random.permutation(idx)
         
         n_chunks = idx.shape[0] // batch_size + 1
         for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
+            
             # Get batch
             mids    = nodes[chunk]
-            targets = np.vstack([self._make_label_vec(mid) for mid in mids])
+            targets = self.targets[mids]
+            
             # Convert to torch
             mids = Variable(torch.LongTensor(mids))
             

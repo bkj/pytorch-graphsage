@@ -29,15 +29,16 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
     perm = torch.randperm(tmp.size(1))
     if adj.is_cuda:
         perm = perm.cuda()
-    
+
     tmp = tmp[:,perm]
     return tmp[:,:n_samples]
 
 
 def evaluate(model, problem, mode='val'):
+    assert mode in ['test', 'val']
     preds, acts = [], []
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, problem.feats, problem.adj, train=False)))
+        preds.append(to_numpy(model(ids, problem.feats, problem.adj, train=True)))
         acts.append(to_numpy(targets))
     
     return problem.metric_fn(np.vstack(acts), np.vstack(preds))
@@ -92,6 +93,7 @@ if __name__ == "__main__":
     print('loading problem: %s' % args.problem_path, file=sys.stderr)
     problem = NodeProblem(problem_path=args.problem_path, cuda=args.cuda)
     
+    print(problem.feats_dim)
     # --
     # Define model
     

@@ -27,9 +27,7 @@ class GSSupervised(nn.Module):
         # --
         # Define network
         
-        self.prep = prep_class(
-            input_dim=input_dim,
-        )
+        self.prep = prep_class(input_dim=input_dim)
         
         input_dim = self.prep.output_dim
         
