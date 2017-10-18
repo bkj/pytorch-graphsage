@@ -89,19 +89,9 @@ class GSSupervised(nn.Module):
         LRSchedule.set_lr(self.optimizer, self.lr)
     
     def train_step(self, ids, feats, adj, targets, loss_fn):
-        
         self.optimizer.zero_grad()
-        
-        # Predict
         preds = self(ids, feats, adj)
-        
-        # Make sure not (N X 1) dimensional
-        targets = targets.squeeze()
-        
-        # Compute loss
-        loss = loss_fn(preds, targets)
-        
-        # Update parameters
+        loss = loss_fn(preds, targets.squeeze())
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()

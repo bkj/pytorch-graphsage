@@ -90,10 +90,8 @@ if __name__ == "__main__":
     # --
     # IO
     
-    print('loading problem: %s' % args.problem_path, file=sys.stderr)
     problem = NodeProblem(problem_path=args.problem_path, cuda=args.cuda)
     
-    print(problem.feats_dim)
     # --
     # Define model
     
@@ -139,16 +137,16 @@ if __name__ == "__main__":
     
     val_f1 = None
     for epoch in range(args.epochs):
+        
         # Train
         for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True):
-            
             model.set_progress((epoch + epoch_progress) / args.epochs)
             preds = model.train_step(
                 ids=ids, 
                 feats=problem.feats,
                 adj=problem.train_adj,
                 targets=targets,
-                loss_fn=problem.loss_fn
+                loss_fn=problem.loss_fn,
             )
         
         # Evaluate

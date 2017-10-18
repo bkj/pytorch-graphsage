@@ -55,6 +55,8 @@ class ProblemMetrics:
 class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
+        print('NodeProblem: loading started')
+        
         f = h5py.File(problem_path)
         self.task      = f['task'].value
         self.n_classes = f['n_classes'].value
@@ -78,6 +80,8 @@ class NodeProblem(object):
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
+        print('NodeProblem: loading finished')
+    
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))
         self.adj = Variable(torch.LongTensor(self.adj))
@@ -88,6 +92,22 @@ class NodeProblem(object):
             self.adj = self.adj.cuda()
             self.feats = self.feats.cuda()
     
+    def __batch_to_torch(self, mids, targets):
+        """ convert batch to torch """
+        mids = Variable(torch.LongTensor(mids))
+        
+        if self.task == 'multilabel_classification':
+            targets = Variable(torch.FloatTensor(targets))
+        elif self.task == 'classification':
+            targets = Variable(torch.LongTensor(targets))
+        else:
+            raise Exception('NodeDataLoader: unknown task: %s' % self.task)
+        
+        if self.cuda:
+            mids, targets = mids.cuda(), targets.cuda()
+        
+        return mids, targets
+    
     def iterate(self, mode, batch_size=512, shuffle=False):
         nodes = self.nodes[mode]
         
@@ -97,22 +117,7 @@ class NodeProblem(object):
         
         n_chunks = idx.shape[0] // batch_size + 1
         for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
-            
-            # Get batch
-            mids    = nodes[chunk]
+            mids = nodes[chunk]
             targets = self.targets[mids]
-            
-            # Convert to torch
-            mids = Variable(torch.LongTensor(mids))
-            
-            if self.task == 'multilabel_classification':
-                targets = Variable(torch.FloatTensor(targets))
-            elif self.task == 'classification':
-                targets = Variable(torch.LongTensor(targets))
-            else:
-                raise Exception('NodeDataLoader: unknown task: %s' % self.task)
-            
-            if self.cuda:
-                mids, targets = mids.cuda(), targets.cuda()
-            
+            mids, targets = self.__batch_to_torch(mids, targets)
             yield mids, targets, chunk_id / n_chunks
