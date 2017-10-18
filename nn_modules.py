@@ -28,29 +28,38 @@ class IdentityPrep(nn.Module):
 class NodeEmbeddingPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, embedding_dim=64):
         """ adds node embedding """
-        super(EmbeddingPrep, self).__init__()
+        super(NodeEmbeddingPrep, self).__init__()
+        
         self.input_dim = input_dim
         self.embedding_dim = embedding_dim
         self.embedding = nn.Embedding(num_embeddings=n_nodes, embedding_dim=embedding_dim)
+        self.fc = nn.Linear(embedding_dim, embedding_dim) # Affine transform, for changing scale + location
     
     @property
     def output_dim(self):
-        return self.input_dim + self.embedding_dim
+        if self.input_dim:
+            return self.input_dim + self.embedding_dim
+        else:
+            return self.embedding_dim
     
     def forward(self, ids, feats, adj):
         embs = self.embedding(ids)
-        return torch.cat([feats, embs], dim=1)
+        embs = self.fc(embs)
+        if self.input_dim:
+            return torch.cat([feats, embs], dim=1)
+        else:
+            return embs
 
 
 class LinearPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, output_dim=32):
         """ adds node embedding """
         super(LinearPrep, self).__init__()
-        self.fc1 = nn.Linear(input_dim, output_dim, bias=False)
+        self.fc = nn.Linear(input_dim, output_dim, bias=False)
         self.output_dim = output_dim
     
     def forward(self, ids, feats, adj):
-        return self.fc1(feats)
+        return self.fc(feats)
 
 
 prep_lookup = {
@@ -90,6 +99,7 @@ class MeanAggregator(nn.Module, AggregatorMixin):
         
         return out
 
+
 class PoolAggregator(nn.Module, AggregatorMixin):
     def __init__(self, input_dim, output_dim, pool_fn, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(PoolAggregator, self).__init__()
@@ -117,6 +127,7 @@ class PoolAggregator(nn.Module, AggregatorMixin):
         
         return out
 
+
 class MaxPoolAggregator(PoolAggregator):
     def __init__(self, input_dim, output_dim, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MaxPoolAggregator, self).__init__(**{
@@ -128,6 +139,7 @@ class MaxPoolAggregator(PoolAggregator):
             "combine_fn" : combine_fn,
         })
 
+
 class MeanPoolAggregator(PoolAggregator):
     def __init__(self, input_dim, output_dim, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MeanPoolAggregator, self).__init__(**{
@@ -138,6 +150,7 @@ class MeanPoolAggregator(PoolAggregator):
             "hidden_dim" : hidden_dim,
             "combine_fn" : combine_fn,
         })
+
 
 class LSTMAggregator(nn.Module, AggregatorMixin):
     def __init__(self, input_dim, output_dim, activation, 
@@ -167,6 +180,7 @@ class LSTMAggregator(nn.Module, AggregatorMixin):
             out = self.activation(out)
         
         return out
+
 
 class AttentionAggregator(nn.Module, AggregatorMixin):
     def __init__(self, input_dim, output_dim, activation, hidden_dim=32, combine_fn=lambda x: torch.cat(x, dim=1)):
@@ -201,6 +215,7 @@ class AttentionAggregator(nn.Module, AggregatorMixin):
             out = self.activation(out)
         
         return out
+
 
 aggregator_lookup = {
     "mean" : MeanAggregator,

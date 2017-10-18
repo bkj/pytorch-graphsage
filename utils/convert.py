@@ -31,6 +31,31 @@ def parse_fold(x):
     else:
         return 'train'
 
+def validate_problem(problem):
+    assert problem['adj'] is not None
+    assert problem['train_adj'] is not None
+    assert problem['targets'] is not None
+    assert problem['folds'] is not None
+    
+    if problem['feats'] is not None:
+        assert problem['feats'].shape[0] == problem['targets'].shape[0]
+        assert problem['feats'].shape[0] == problem['folds'].shape[0]
+        assert problem['adj'].shape[0] == (problem['feats'].shape[0] + 1)
+    
+    assert problem['adj'].shape[0] == problem['train_adj'].shape[0]
+    assert len(problem['targets'].shape) == 2
+    return True
+
+def save_problem(problem, outpath):
+    assert validate_problem(problem)
+    
+    f = h5py.File(outpath)
+    for k,v in problem.items():
+        if v is not None:
+            f[k] = v
+    
+    f.close()
+
 
 def make_adjacency(G, folds, max_degree, train=True):
     
@@ -113,7 +138,8 @@ if __name__ == "__main__":
         n_classes = len(np.unique(targets))
     elif args.task == 'multilabel_classification':
         n_classes = targets.shape[1]
-    
+    elif 'regression' in args.task:
+        n_classes = None
     
     print('saving -> %s' % args.outpath, file=sys.stderr)
     problem = {
@@ -126,14 +152,4 @@ if __name__ == "__main__":
         "folds"     : folds,
     }
     
-    assert feats.shape[0] == targets.shape[0]
-    assert feats.shape[0] == folds.shape[0]
-    assert adj.shape[0] == train_adj.shape[0]
-    assert adj.shape[0] == (feats.shape[0] + 1)
-    assert len(targets.shape) == 2
-    
-    f = h5py.File(args.outpath)
-    for k,v in problem.items():
-        f[k] = v
-        
-    f.close()
+    save_problem(problem, args.outpath)

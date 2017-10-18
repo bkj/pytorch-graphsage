@@ -29,6 +29,14 @@ class ProblemLosses:
     @staticmethod
     def classification(preds, targets):
         return F.cross_entropy(preds, targets)
+        
+    @staticmethod
+    def regression_mae(preds, targets):
+        return F.l1_loss(preds, targets)
+        
+    # @staticmethod
+    # def regression_mse(preds, targets):
+    #     return F.mse_loss(preds - targets)
 
 
 class ProblemMetrics:
@@ -43,11 +51,16 @@ class ProblemMetrics:
     @staticmethod
     def classification(y_true, y_pred):
         y_pred = np.argmax(y_pred, axis=1)
-        # return {
-        #     "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-        #     "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
-        # }
-        return (y_pred == y_true.squeeze()).mean()
+        return {
+            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+        }
+        # return (y_pred == y_true.squeeze()).mean()
+    
+    @staticmethod
+    def regression_mae(y_true, y_pred):
+        return np.abs(y_true - y_pred).mean()
+
 
 # --
 # Problem definition
@@ -59,17 +72,15 @@ class NodeProblem(object):
         
         f = h5py.File(problem_path)
         self.task      = f['task'].value
-        self.n_classes = f['n_classes'].value
-        self.feats     = f['feats'].value
+        self.n_classes = f['n_classes'].value if 'n_classes' in f else 1 # !!
+        self.feats     = f['feats'].value if 'feats' in f else None
         self.folds     = f['folds'].value
         self.targets   = f['targets'].value
         self.adj       = f['adj'].value
         self.train_adj = f['train_adj'].value
         f.close()
         
-        self.__validate_problem()
-        
-        self.feats_dim = self.feats.shape[1]
+        self.feats_dim = self.feats.shape[1] if self.feats else None
         self.n_nodes   = self.adj.shape[0]
         self.cuda      = cuda
         self.__to_torch()
@@ -94,24 +105,18 @@ class NodeProblem(object):
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
         print('NodeProblem: loading finished')
-        
-    def __validate_problem(self):
-        """ validate input format """
-        assert self.feats.shape[0] == self.targets.shape[0]
-        assert self.feats.shape[0] == self.folds.shape[0]
-        assert self.adj.shape[0] == self.train_adj.shape[0]
-        assert self.adj.shape[0] == (self.feats.shape[0] + 1)
-        assert len(self.targets.shape) == 2
     
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))
         self.adj = Variable(torch.LongTensor(self.adj))
-        self.feats = Variable(torch.FloatTensor(self.feats))
+        if self.feats:
+            self.feats = Variable(torch.FloatTensor(self.feats))
         
         if self.cuda:
             self.train_adj = self.train_adj.cuda()
             self.adj = self.adj.cuda()
-            self.feats = self.feats.cuda()
+            if self.feats:
+                self.feats = self.feats.cuda()
     
     def __batch_to_torch(self, mids, targets):
         """ convert batch to torch """
@@ -121,6 +126,8 @@ class NodeProblem(object):
             targets = Variable(torch.FloatTensor(targets))
         elif self.task == 'classification':
             targets = Variable(torch.LongTensor(targets))
+        elif 'regression' in self.task:
+            targets = Variable(torch.FloatTensor(targets))
         else:
             raise Exception('NodeDataLoader: unknown task: %s' % self.task)
         

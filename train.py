@@ -29,7 +29,7 @@ def uniform_neighbor_sampler(ids, adj, n_samples=-1):
     perm = torch.randperm(tmp.size(1))
     if adj.is_cuda:
         perm = perm.cuda()
-
+    
     tmp = tmp[:,perm]
     return tmp[:,:n_samples]
 
@@ -76,18 +76,17 @@ def parse_args():
     
     args = parser.parse_args()
     args.cuda = not args.no_cuda
-    assert args.prep_class in prep_lookup.keys(), 'parse_args: aggregator_class not recognized.'
-    assert args.aggregator_class in aggregator_lookup.keys(), 'parse_args: prep_class not recognized.'
+    assert args.prep_class in prep_lookup.keys(), 'parse_args: prep_class not in %s' % str(prep_lookup.keys())
+    assert args.aggregator_class in aggregator_lookup.keys(), 'parse_args: aggregator_class not in %s' % str(aggregator_lookup.keys())
     assert args.batch_size > 1, 'parse_args: batch_size must be > 1'
     return args
 
 if __name__ == "__main__":
     args = parse_args()
-    
     set_seeds(args.seed)
     
     # --
-    # IO
+    # Load problem
     
     problem = NodeProblem(problem_path=args.problem_path, cuda=args.cuda)
     
@@ -105,20 +104,20 @@ if __name__ == "__main__":
         "n_nodes"   : problem.n_nodes,
         "n_classes" : problem.n_classes,
         "layer_specs" : [
-            {
-                "sample_fn" : uniform_neighbor_sampler,
-                "n_train_samples" : n_train_samples[0],
-                "n_val_samples" : n_val_samples[0],
-                "output_dim" : output_dims[0],
-                "activation" : F.relu,
-            },
-            {
-                "sample_fn" : uniform_neighbor_sampler,
-                "n_train_samples" : n_train_samples[1],
-                "n_val_samples" : n_val_samples[1],
-                "output_dim" : output_dims[1],
-                "activation" : lambda x: x,
-            },
+            # {
+            #     "sample_fn" : uniform_neighbor_sampler,
+            #     "n_train_samples" : n_train_samples[0],
+            #     "n_val_samples" : n_val_samples[0],
+            #     "output_dim" : output_dims[0],
+            #     "activation" : F.relu,
+            # },
+            # {
+            #     "sample_fn" : uniform_neighbor_sampler,
+            #     "n_train_samples" : n_train_samples[1],
+            #     "n_val_samples" : n_val_samples[1],
+            #     "output_dim" : output_dims[1],
+            #     "activation" : lambda x: x,
+            # },
         ],
         
         "lr_init" : args.lr_init,
@@ -146,18 +145,21 @@ if __name__ == "__main__":
             preds = model.train_step(
                 ids=ids, 
                 feats=problem.feats,
-                # adj=problem.train_adj,
-                adj=problem.adj,
+                adj=problem.train_adj,
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
+            print({
+                "epoch_progress" : epoch_progress,
+                "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
+            })
         
         # Evaluate
         _ = model.eval()
         print({
-            "epoch"    : epoch,
-            "train_f1" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
-            "val_f1"   : evaluate(model, problem, mode='val'),
+            "epoch" : epoch,
+            "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
+            "val_metric" : evaluate(model, problem, mode='val'),
         })
         
     if args.show_test:

@@ -58,15 +58,17 @@ class GSSupervised(nn.Module):
     def _sample(self, ids, feats, adj, train):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        all_feats = [self.prep(ids, feats[ids], adj)]
+        tmp_feats = feats[ids] if feats else None
+        all_feats = [self.prep(ids, tmp_feats, adj)]
         for sampler_fn in sample_fns:
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
-            all_feats.append(self.prep(ids, feats[ids], adj))
+            tmp_feats = feats[ids] if feats else None
+            all_feats.append(self.prep(ids, tmp_feats, adj))
         
         return all_feats
     
     def forward(self, ids, feats, adj, train=True):
-        # Collect feats for points in neighborhoods of ids
+        # Sample neighbors + apply `prep_class`
         all_feats = self._sample(ids, feats, adj, train=train)
         
         # Sequentially apply layers, per original (little weird, IMO)
