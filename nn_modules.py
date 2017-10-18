@@ -12,11 +12,11 @@ from torch.nn import functional as F
 # Preprocessers
 
 class IdentityPrep(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, n_nodes=None):
         """ Example of preprocessor -- doesn't do anything """
         super(IdentityPrep, self).__init__()
         self.input_dim = input_dim
-        
+    
     @property
     def output_dim(self):
         return self.input_dim
@@ -24,8 +24,27 @@ class IdentityPrep(nn.Module):
     def forward(self, ids, feats, adj):
         return feats
 
+
+class EmbeddingPrep(nn.Module):
+    def __init__(self, input_dim, n_nodes, embedding_dim=64):
+        """ adds node embedding """
+        super(EmbeddingPrep, self).__init__()
+        self.input_dim = input_dim
+        self.embedding_dim = embedding_dim
+        self.embedding = nn.Embedding(num_embeddings=n_nodes, embedding_dim=embedding_dim)
+    
+    @property
+    def output_dim(self):
+        return self.input_dim + self.embedding_dim
+    
+    def forward(self, ids, feats, adj):
+        embs = self.embedding(ids)
+        return torch.cat([feats, embs], dim=1)
+
+
 prep_lookup = {
     "identity" : IdentityPrep,
+    "embedding" : EmbeddingPrep,
 }
 
 # --

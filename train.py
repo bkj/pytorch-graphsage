@@ -103,6 +103,7 @@ if __name__ == "__main__":
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
         "input_dim" : problem.feats_dim,
+        "n_nodes"   : problem.n_nodes,
         "n_classes" : problem.n_classes,
         "layer_specs" : [
             {
@@ -120,6 +121,7 @@ if __name__ == "__main__":
                 "activation" : lambda x: x,
             },
         ],
+        
         "lr_init" : args.lr_init,
         "lr_schedule" : args.lr_schedule,
         "weight_decay" : args.weight_decay,
@@ -144,7 +146,8 @@ if __name__ == "__main__":
             preds = model.train_step(
                 ids=ids, 
                 feats=problem.feats,
-                adj=problem.train_adj,
+                # adj=problem.train_adj,
+                adj=problem.adj,
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )

@@ -19,16 +19,14 @@ from lr import LRSchedule
 # Model
 
 class GSSupervised(nn.Module):
-    def __init__(self, input_dim, n_classes, layer_specs, 
-        aggregator_class, prep_class, lr_init=0.01, weight_decay=0.0,
-        lr_schedule='constant', epochs=10):
+    def __init__(self, input_dim, n_nodes, n_classes, layer_specs, aggregator_class, prep_class, 
+        lr_init=0.01, weight_decay=0.0, lr_schedule='constant', epochs=10):
         super(GSSupervised, self).__init__()
         
         # --
         # Define network
         
-        self.prep = prep_class(input_dim=input_dim)
-        
+        self.prep = prep_class(input_dim=input_dim, n_nodes=n_nodes)
         input_dim = self.prep.output_dim
         
         agg_layers = []
@@ -60,17 +58,14 @@ class GSSupervised(nn.Module):
     def _sample(self, ids, feats, adj, train):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        all_feats = [feats[ids]]
+        all_feats = [self.prep(ids, feats[ids], adj)]
         for sampler_fn in sample_fns:
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
-            all_feats.append(feats[ids])
+            all_feats.append(self.prep(ids, feats[ids], adj))
         
         return all_feats
     
     def forward(self, ids, feats, adj, train=True):
-        # Prep feats
-        feats = self.prep(ids, feats, adj)
-        
         # Collect feats for points in neighborhoods of ids
         all_feats = self._sample(ids, feats, adj, train=train)
         

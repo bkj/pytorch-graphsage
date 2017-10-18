@@ -68,6 +68,7 @@ class NodeProblem(object):
         f.close()
         
         self.feats_dim = self.feats.shape[1]
+        self.n_nodes   = self.adj.shape[0]
         self.cuda      = cuda
         self.__to_torch()
         
@@ -77,15 +78,15 @@ class NodeProblem(object):
             "test"  : np.where(self.folds == 'test')[0],
         }
         
-        # >>
-        # Drop some nodes from "train" nodes
-        alpha = 0.01
-        self.nodes['train'] = np.random.choice(
-            self.nodes['train'], 
-            size=int(self.nodes['train'].shape[0] * alpha)
-        )
-        print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
-        # <<
+        # # >>
+        # Drop some nodes from "train" nodes -- semi-supervised
+        # alpha = 0.10
+        # self.nodes['train'] = np.random.choice(
+        #     self.nodes['train'], 
+        #     size=int(self.nodes['train'].shape[0] * alpha)
+        # )
+        # print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
+        # # <<
         
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
