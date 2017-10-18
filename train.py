@@ -75,11 +75,10 @@ def parse_args():
     # Validate args
     
     args = parser.parse_args()
-    
     args.cuda = not args.no_cuda
-    assert args.prep_class in prep_lookup.keys(), 'Error: aggregator_class not recognized.'
-    assert args.aggregator_class in aggregator_lookup.keys(), 'Error: prep_class not recognized.'
-    
+    assert args.prep_class in prep_lookup.keys(), 'parse_args: aggregator_class not recognized.'
+    assert args.aggregator_class in aggregator_lookup.keys(), 'parse_args: prep_class not recognized.'
+    assert args.batch_size > 1, 'parse_args: batch_size must be > 1'
     return args
 
 if __name__ == "__main__":
@@ -141,7 +140,8 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         
         # Train
-        for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True):
+        _ = model.train()
+        for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True, batch_size=args.batch_size):
             model.set_progress((epoch + epoch_progress) / args.epochs)
             preds = model.train_step(
                 ids=ids, 
@@ -153,6 +153,7 @@ if __name__ == "__main__":
             )
         
         # Evaluate
+        _ = model.eval()
         print({
             "epoch"    : epoch,
             "train_f1" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),

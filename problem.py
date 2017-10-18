@@ -43,11 +43,11 @@ class ProblemMetrics:
     @staticmethod
     def classification(y_true, y_pred):
         y_pred = np.argmax(y_pred, axis=1)
-        return {
-            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
-        }
-
+        # return {
+        #     "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
+        #     "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+        # }
+        return (y_pred == y_true.squeeze()).mean()
 
 # --
 # Problem definition
@@ -66,6 +66,8 @@ class NodeProblem(object):
         self.adj       = f['adj'].value
         self.train_adj = f['train_adj'].value
         f.close()
+        
+        self.__validate_problem()
         
         self.feats_dim = self.feats.shape[1]
         self.n_nodes   = self.adj.shape[0]
@@ -92,6 +94,14 @@ class NodeProblem(object):
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
         print('NodeProblem: loading finished')
+        
+    def __validate_problem(self):
+        """ validate input format """
+        assert self.feats.shape[0] == self.targets.shape[0]
+        assert self.feats.shape[0] == self.folds.shape[0]
+        assert self.adj.shape[0] == self.train_adj.shape[0]
+        assert self.adj.shape[0] == (self.feats.shape[0] + 1)
+        assert len(self.targets.shape) == 2
     
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))

@@ -10,9 +10,8 @@ time python ./train.py \
     --aggregator-class mean
 
 time python ./train.py \
-    --problem-path ./data/reddit/problem.h5 \
-    --aggregator-class mean \
-    --prep-class embedding 
+    --problem-path ./data/cora/problem.h5 \
+    --aggregator-class mean
 
 
 python ./train.py \

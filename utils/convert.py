@@ -125,9 +125,15 @@ if __name__ == "__main__":
         "targets"   : targets,
         "folds"     : folds,
     }
-
+    
+    assert feats.shape[0] == targets.shape[0]
+    assert feats.shape[0] == folds.shape[0]
+    assert adj.shape[0] == train_adj.shape[0]
+    assert adj.shape[0] == (feats.shape[0] + 1)
+    assert len(targets.shape) == 2
+    
     f = h5py.File(args.outpath)
     for k,v in problem.items():
         f[k] = v
-
+        
     f.close()

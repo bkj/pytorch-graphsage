@@ -25,7 +25,7 @@ class IdentityPrep(nn.Module):
         return feats
 
 
-class EmbeddingPrep(nn.Module):
+class NodeEmbeddingPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, embedding_dim=64):
         """ adds node embedding """
         super(EmbeddingPrep, self).__init__()
@@ -42,9 +42,21 @@ class EmbeddingPrep(nn.Module):
         return torch.cat([feats, embs], dim=1)
 
 
+class LinearPrep(nn.Module):
+    def __init__(self, input_dim, n_nodes, output_dim=32):
+        """ adds node embedding """
+        super(LinearPrep, self).__init__()
+        self.fc1 = nn.Linear(input_dim, output_dim, bias=False)
+        self.output_dim = output_dim
+    
+    def forward(self, ids, feats, adj):
+        return self.fc1(feats)
+
+
 prep_lookup = {
     "identity" : IdentityPrep,
-    "embedding" : EmbeddingPrep,
+    "node_embedding" : NodeEmbeddingPrep,
+    "linear" : LinearPrep,
 }
 
 # --
