@@ -86,6 +86,34 @@ def make_adjacency(G, folds, max_degree, train=True):
     return adj
 
 
+# def make_adjacency_2(G, max_degree=128, train=None):
+#     """ simpler version of above """
+#     all_nodes = np.array(G.nodes())
+    
+#     # Initialize w/ links to a dummy node
+#     n_nodes = len(all_nodes)
+#     adj = (np.zeros((n_nodes + 1, max_degree)) + n_nodes).astype(int)
+    
+#     if train is not None:
+#         # only look at nodes in training set
+#         all_nodes = all_nodes[train]
+    
+#     for node in all_nodes:
+#         neibs = np.array(G.neighbors(node))
+        
+#         if train is not None:
+#             neibs = neibs[train[neibs]]
+        
+#         if len(neibs) > 0:
+#             if len(neibs) > max_degree:
+#                 neibs = np.random.choice(neibs, max_degree, replace=False)
+#             elif len(neibs) < max_degree:
+#                 neibs = np.random.choice(neibs, max_degree, replace=True)
+            
+#             adj[node, :] = neibs
+    
+#     return adj
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--inpath', type=str, default='./data/reddit/')
