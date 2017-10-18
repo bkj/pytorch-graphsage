@@ -59,11 +59,11 @@ class GSSupervised(nn.Module):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
         tmp_feats = feats[ids] if feats else None
-        all_feats = [self.prep(ids, tmp_feats, adj)]
-        for sampler_fn in sample_fns:
+        all_feats = [self.prep(ids, tmp_feats, adj, layer_idx=0)]
+        for layer_idx, sampler_fn in enumerate(sample_fns):
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
             tmp_feats = feats[ids] if feats else None
-            all_feats.append(self.prep(ids, tmp_feats, adj))
+            all_feats.append(self.prep(ids, tmp_feats, adj, layer_idx=layer_idx + 1))
         
         return all_feats
     

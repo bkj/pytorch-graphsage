@@ -7,6 +7,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.autograd import Variable
 
 # --
 # Preprocessers
@@ -30,9 +31,10 @@ class NodeEmbeddingPrep(nn.Module):
         """ adds node embedding """
         super(NodeEmbeddingPrep, self).__init__()
         
+        self.n_nodes = n_nodes
         self.input_dim = input_dim
         self.embedding_dim = embedding_dim
-        self.embedding = nn.Embedding(num_embeddings=n_nodes, embedding_dim=embedding_dim)
+        self.embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=embedding_dim)
         self.fc = nn.Linear(embedding_dim, embedding_dim) # Affine transform, for changing scale + location
     
     @property
@@ -42,8 +44,13 @@ class NodeEmbeddingPrep(nn.Module):
         else:
             return self.embedding_dim
     
-    def forward(self, ids, feats, adj):
-        embs = self.embedding(ids)
+    def forward(self, ids, feats, adj, layer_idx=0):
+        if layer_idx > 0:
+            embs = self.embedding(ids)
+        else:
+            # Don't look at node's own embedding for prediction, or you'll probably overfit a lot
+            embs = self.embedding(Variable(ids.clone().data.zero_() + self.n_nodes))
+        
         embs = self.fc(embs)
         if self.input_dim:
             return torch.cat([feats, embs], dim=1)

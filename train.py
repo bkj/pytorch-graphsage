@@ -104,20 +104,20 @@ if __name__ == "__main__":
         "n_nodes"   : problem.n_nodes,
         "n_classes" : problem.n_classes,
         "layer_specs" : [
-            # {
-            #     "sample_fn" : uniform_neighbor_sampler,
-            #     "n_train_samples" : n_train_samples[0],
-            #     "n_val_samples" : n_val_samples[0],
-            #     "output_dim" : output_dims[0],
-            #     "activation" : F.relu,
-            # },
-            # {
-            #     "sample_fn" : uniform_neighbor_sampler,
-            #     "n_train_samples" : n_train_samples[1],
-            #     "n_val_samples" : n_val_samples[1],
-            #     "output_dim" : output_dims[1],
-            #     "activation" : lambda x: x,
-            # },
+            {
+                "sample_fn" : uniform_neighbor_sampler,
+                "n_train_samples" : n_train_samples[0],
+                "n_val_samples" : n_val_samples[0],
+                "output_dim" : output_dims[0],
+                "activation" : F.relu,
+            },
+            {
+                "sample_fn" : uniform_neighbor_sampler,
+                "n_train_samples" : n_train_samples[1],
+                "n_val_samples" : n_val_samples[1],
+                "output_dim" : output_dims[1],
+                "activation" : lambda x: x,
+            },
         ],
         
         "lr_init" : args.lr_init,
@@ -153,14 +153,17 @@ if __name__ == "__main__":
                 "epoch_progress" : epoch_progress,
                 "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
             })
+            sys.stdout.flush()
         
         # Evaluate
         _ = model.eval()
+        print('-- eval --', file=sys.stderr)
         print({
             "epoch" : epoch,
             "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
             "val_metric" : evaluate(model, problem, mode='val'),
         })
+        print('----------', file=sys.stderr)
         
     if args.show_test:
         print({"test_f1" : evaluate(model, problem, mode='test')})
