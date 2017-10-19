@@ -11,6 +11,7 @@ import sys
 import json
 import argparse
 import numpy as np
+from time import time
 
 import torch
 from torch.autograd import Variable
@@ -53,6 +54,7 @@ def parse_args():
     parser.add_argument('--problem-path', type=str, required=True)
     parser.add_argument('--no-cuda', action="store_true")
     
+    
     # Optimization params
     parser.add_argument('--batch-size', type=int, default=512)
     parser.add_argument('--epochs', type=int, default=10)
@@ -71,6 +73,7 @@ def parse_args():
     parser.add_argument('--log-interval', default=10, type=int)
     parser.add_argument('--seed', default=123, type=int)
     parser.add_argument('--show-test', action="store_true")
+    parser.add_argument('--checkpoint', action="store_true")
     
     # --
     # Validate args
@@ -137,6 +140,8 @@ if __name__ == "__main__":
     
     set_seeds(args.seed ** 2)
     
+    t = time()
+    
     for epoch in range(args.epochs):
         
         # Train
@@ -150,24 +155,31 @@ if __name__ == "__main__":
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
-            print(json.dumps({
-                "epoch" : epoch,
-                "epoch_progress" : epoch_progress,
-                # "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds)))
-                "train_loss" : loss.data[0],
-            }))
-            sys.stdout.flush()
+            
+            print(time() - t)
+            
+    #         print(json.dumps({
+    #             "epoch" : epoch,
+    #             "epoch_progress" : epoch_progress,
+    #             # "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds)))
+    #             "train_loss" : loss.data[0],
+    #         }))
+    #         sys.stdout.flush()
         
-        # Evaluate
-        _ = model.eval()
-        print(json.dumps({
-            "epoch" : epoch,
-            "epoch_progress" : epoch_progress,
-            "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds))),
-            "val_metric" : float(evaluate(model, problem, mode='val')),
-        }))
-        sys.stdout.flush()
+    #     # Evaluate
+    #     _ = model.eval()
+    #     print(json.dumps({
+    #         "epoch" : epoch,
+    #         "epoch_progress" : epoch_progress,
+    #         "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds))),
+    #         "val_metric" : float(evaluate(model, problem, mode='val')),
+    #     }))
+    #     sys.stdout.flush()
         
-    if args.show_test:
-        print({"test_f1" : evaluate(model, problem, mode='test')})
+    #     # Save
+    #     if args.checkpoint:
+    #         torch.save(model.state_dict(), '.checkpoint.gs')
+        
+    # if args.show_test:
+    #     print({"test_f1" : evaluate(model, problem, mode='test')})
 

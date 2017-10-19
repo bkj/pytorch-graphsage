@@ -9,14 +9,14 @@ def latlon2cartesian(latlon, d=1):
     return np.array([
         d * np.cos(latlon[:,0]) * np.cos(-latlon[:,1]), # x
         d * np.cos(latlon[:,0]) * np.sin(-latlon[:,1]), # y
-        d * np.sin(latlon[:,0]),                      # z
+        d * np.sin(latlon[:,0]),                        # z
     ]).T
 
 def cartesian2latlon(xyz):
     d = (xyz ** 2).sum(axis=1)
     latlon = np.array([
         np.pi / 2 - np.arccos(xyz[:,2] / d), # lat
-        - np.arctan2(xyz[:,1], xyz[:,0]),           # lon
+        - np.arctan2(xyz[:,1], xyz[:,0]),    # lon
     ]).T
     return np.degrees(latlon)
 
@@ -47,6 +47,7 @@ sel = ((locs.latitude < bbox['north']) &
 
 locs = locs[sel]
 
+edges = pd.DataFrame(edges)
 edges = edges[edges[0].isin(locs.user_id) & edges[1].isin(locs.user_id)]
 locs = locs[locs.user_id.isin(np.unique(edges))]
 assert locs.shape[0] == np.unique(edges).shape[0]
@@ -55,8 +56,6 @@ assert locs.user_id.unique().shape[0] == locs.shape[0], 'non-unique user in locs
 # Fix ids
 
 locs['uid'] = np.arange(locs.shape[0])
-
-edges = pd.DataFrame(edges)
 edges = pd.merge(edges, locs[['user_id', 'uid']], left_on=0, right_on='user_id')
 edges = edges[['uid', 1]]
 edges.columns = (0, 1)
@@ -71,9 +70,10 @@ assert (np.unique(edges).shape[0] == np.array(edges).max() + 1), 'new ids not se
 # Fix targets
 
 targets = np.array(locs[['latitude', 'longitude']])
-cart_targets = latlon2cartesian(targets)
-assert np.allclose((cart_targets ** 2).sum(axis=1), 1), 'not unit norm'
-assert np.allclose((cartesian2latlon(cart_targets) % 360 - targets % 360), 0), 'not reversible'
+targets_ = np.radians(targets)
+# targets_ = latlon2cartesian(targets)
+# assert np.allclose((targets_ ** 2).sum(axis=1), 1), 'not unit norm'
+# assert np.allclose((cartesian2latlon(targets_) % 360 - targets % 360), 0), 'not reversible'
 
 # --
 # Folds
@@ -91,6 +91,6 @@ save_problem({
     "feats"     : None,
     "train_adj" : adj,
     "adj"       : adj,
-    "targets"   : cart_targets,
+    "targets"   : targets_,
     "folds"     : folds,
 }, outpath)

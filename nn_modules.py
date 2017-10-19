@@ -24,7 +24,7 @@ class IdentityPrep(nn.Module):
     def output_dim(self):
         return self.input_dim
     
-    def forward(self, ids, feats, adj):
+    def forward(self, ids, feats, adj, layer_idx=0):
         return feats
 
 
@@ -67,7 +67,7 @@ class LinearPrep(nn.Module):
         self.fc = nn.Linear(input_dim, output_dim, bias=False)
         self.output_dim = output_dim
     
-    def forward(self, ids, feats, adj):
+    def forward(self, ids, feats, adj, layer_idx=0):
         return self.fc(feats)
 
 

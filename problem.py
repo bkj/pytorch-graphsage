@@ -18,6 +18,8 @@ import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
+from helpers import to_numpy
+
 # --
 # Helper classes
 
@@ -36,11 +38,30 @@ class ProblemLosses:
     
     @staticmethod
     def geo_regression(preds, targets):
-        cosine_sims = (F.normalize(preds) * F.normalize(targets)).sum(dim=1)
-        cosine_sims = cosine_sims.clamp(-1, 1)
-        # Probably care about the log of this...
-        print({"dist" : (torch.acos(cosine_sims) * 6371).mean().data[0]}, file=sys.stderr)
-        return (1 - cosine_sims).mean()
+        
+        dlatitude  = preds[:,0] - targets[:,0]
+        dlongitude = preds[:,1] - targets[:,1]
+        
+        errs = torch.sin(dlatitude / 2) ** 2 + torch.cos(preds[:,0]) * torch.cos(targets[:,0]) * torch.sin(dlongitude / 2) ** 2
+        errs = 2 * torch.asin(torch.sqrt(errs)) 
+        errs = (errs * 6371)
+        
+        print({
+            "mean" : errs.mean().data[0],
+            "median" : errs.median().data[0],
+        }, file=sys.stderr)
+        return (errs + 1e-4).log().mean()
+        
+        # Underflows
+        #
+        # cosine_sims = (F.normalize(preds) * F.normalize(targets)).sum(dim=1)
+        # cosine_sims = cosine_sims.clamp(-1 + 1e-9, 1 - 1e-9)
+        # d = torch.acos(cosine_sims) * 6371
+        # print({
+        #     "mean" : d.mean().data[0],
+        #     "median" : d.median().data[0],
+        # }, file=sys.stderr)
+        # return = torch.acos(cosine_sims).mean()
 
 
 class ProblemMetrics:
@@ -54,11 +75,14 @@ class ProblemMetrics:
     
     @staticmethod
     def classification(y_true, y_pred):
+        # f1
         y_pred = np.argmax(y_pred, axis=1)
         return {
             "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
             "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
         }
+        
+        # accuracy
         # return (y_pred == y_true.squeeze()).mean()
     
     @staticmethod
@@ -67,10 +91,12 @@ class ProblemMetrics:
     
     @staticmethod
     def geo_regression(preds, targets):
-        preds   /= np.sqrt((preds ** 2).sum(axis=1, keepdims=True))
-        targets /= np.sqrt((targets ** 2).sum(axis=1, keepdims=True))
-        cosine_sims = (preds * targets).sum(axis=1)
-        return (np.arccos(cosine_sims) * 6371).mean()
+        dlatitude  = preds[:,0] - targets[:,0]
+        dlongitude = preds[:,1] - targets[:,1]
+        errs = np.sin(dlatitude / 2) ** 2 + np.cos(preds[:,0]) * np.cos(targets[:,0]) * np.sin(dlongitude / 2) ** 2
+        errs = 2 * np.arcsin(np.sqrt(errs)) 
+        errs = (errs * 6371)
+        return np.median(errs)
 
 
 # --
@@ -91,7 +117,7 @@ class NodeProblem(object):
         self.train_adj = f['train_adj'].value
         f.close()
         
-        self.feats_dim = self.feats.shape[1] if self.feats else None
+        self.feats_dim = self.feats.shape[1] if self.feats is not None else None
         self.n_nodes   = self.adj.shape[0]
         self.cuda      = cuda
         self.__to_torch()
@@ -124,13 +150,13 @@ class NodeProblem(object):
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))
         self.adj = Variable(torch.LongTensor(self.adj))
-        if self.feats:
+        if self.feats is not None:
             self.feats = Variable(torch.FloatTensor(self.feats))
         
         if self.cuda:
             self.train_adj = self.train_adj.cuda()
             self.adj = self.adj.cuda()
-            if self.feats:
+            if self.feats is not None:
                 self.feats = self.feats.cuda()
     
     def __batch_to_torch(self, mids, targets):
