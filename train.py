@@ -8,6 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 import sys
+import json
 import argparse
 import numpy as np
 
@@ -125,45 +126,47 @@ if __name__ == "__main__":
         "weight_decay" : args.weight_decay,
     })
     
-    if args.cuda:
-        model = model.cuda()
-    
     print(model, file=sys.stderr)
+    
+    if args.cuda:
+        print("model.cuda()", file=sys.stderr)
+        model = model.cuda()
     
     # --
     # Train
     
     set_seeds(args.seed ** 2)
     
-    val_f1 = None
     for epoch in range(args.epochs):
         
         # Train
         _ = model.train()
         for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True, batch_size=args.batch_size):
             model.set_progress((epoch + epoch_progress) / args.epochs)
-            preds = model.train_step(
+            preds, loss = model.train_step(
                 ids=ids, 
                 feats=problem.feats,
                 adj=problem.train_adj,
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
-            # print({
-            #     "epoch_progress" : epoch_progress,
-            #     "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
-            # })
-            # sys.stdout.flush()
+            print(json.dumps({
+                "epoch" : epoch,
+                "epoch_progress" : epoch_progress,
+                # "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds)))
+                "train_loss" : loss.data[0],
+            }))
+            sys.stdout.flush()
         
         # Evaluate
         _ = model.eval()
-        # print('-- eval --', file=sys.stderr)
-        print({
+        print(json.dumps({
             "epoch" : epoch,
-            "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
-            "val_metric" : evaluate(model, problem, mode='val'),
-        })
-        # print('----------', file=sys.stderr)
+            "epoch_progress" : epoch_progress,
+            "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds))),
+            "val_metric" : float(evaluate(model, problem, mode='val')),
+        }))
+        sys.stdout.flush()
         
     if args.show_test:
         print({"test_f1" : evaluate(model, problem, mode='test')})

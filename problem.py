@@ -33,10 +33,14 @@ class ProblemLosses:
     @staticmethod
     def regression_mae(preds, targets):
         return F.l1_loss(preds, targets)
-        
-    # @staticmethod
-    # def regression_mse(preds, targets):
-    #     return F.mse_loss(preds - targets)
+    
+    @staticmethod
+    def geo_regression(preds, targets):
+        cosine_sims = (F.normalize(preds) * F.normalize(targets)).sum(dim=1)
+        cosine_sims = cosine_sims.clamp(-1, 1)
+        # Probably care about the log of this...
+        print({"dist" : (torch.acos(cosine_sims) * 6371).mean().data[0]}, file=sys.stderr)
+        return (1 - cosine_sims).mean()
 
 
 class ProblemMetrics:
@@ -60,6 +64,13 @@ class ProblemMetrics:
     @staticmethod
     def regression_mae(y_true, y_pred):
         return np.abs(y_true - y_pred).mean()
+    
+    @staticmethod
+    def geo_regression(preds, targets):
+        preds   /= np.sqrt((preds ** 2).sum(axis=1, keepdims=True))
+        targets /= np.sqrt((targets ** 2).sum(axis=1, keepdims=True))
+        cosine_sims = (preds * targets).sum(axis=1)
+        return (np.arccos(cosine_sims) * 6371).mean()
 
 
 # --
@@ -68,7 +79,7 @@ class ProblemMetrics:
 class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
-        print('NodeProblem: loading started')
+        print('NodeProblem: loading', file=sys.stderr)
         
         f = h5py.File(problem_path)
         self.task      = f['task'].value
@@ -93,18 +104,22 @@ class NodeProblem(object):
         
         # >>
         # Drop some nodes from "train" nodes -- semi-supervised
-        alpha = 0.50 / 0.80
-        self.nodes['train'] = np.random.choice(
-            self.nodes['train'], 
-            size=int(self.nodes['train'].shape[0] * alpha)
-        )
-        print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
+        # alpha = 0.50 / 0.80
+        # self.nodes['train'] = np.random.choice(
+        #     self.nodes['train'], 
+        #     size=int(self.nodes['train'].shape[0] * alpha)
+        # )
+        # print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
         # <<
         
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
-        print('NodeProblem: loading finished')
+        print('    task -> %s' % self.task, file=sys.stderr)
+        print('    n_classes -> %d' % self.n_classes, file=sys.stderr)
+        if self.feats_dim is not None:
+            print('    feats_dim -> %d' % self.feats_dim, file=sys.stderr)
+        
     
     def __to_torch(self):
         self.train_adj = Variable(torch.LongTensor(self.train_adj))

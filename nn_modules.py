@@ -4,6 +4,8 @@
     nn_modules.py
 """
 
+from __future__ import division
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -27,7 +29,7 @@ class IdentityPrep(nn.Module):
 
 
 class NodeEmbeddingPrep(nn.Module):
-    def __init__(self, input_dim, n_nodes, embedding_dim=64):
+    def __init__(self, input_dim, n_nodes, embedding_dim=32):
         """ adds node embedding """
         super(NodeEmbeddingPrep, self).__init__()
         
@@ -36,7 +38,7 @@ class NodeEmbeddingPrep(nn.Module):
         self.embedding_dim = embedding_dim
         self.embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=embedding_dim)
         self.fc = nn.Linear(embedding_dim, embedding_dim) # Affine transform, for changing scale + location
-    
+        
     @property
     def output_dim(self):
         if self.input_dim:

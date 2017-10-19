@@ -54,16 +54,14 @@ class GSSupervised(nn.Module):
         self.lr_scheduler = partial(getattr(LRSchedule, lr_schedule), lr_init=lr_init)
         self.lr = self.lr_scheduler(0.0)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
-    
+        
     def _sample(self, ids, feats, adj, train):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        tmp_feats = feats[ids] if feats else None
-        all_feats = [self.prep(ids, tmp_feats, adj, layer_idx=0)]
+        all_feats = [self.prep(ids, feats[ids] if feats else None, adj, layer_idx=0)]
         for layer_idx, sampler_fn in enumerate(sample_fns):
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
-            tmp_feats = feats[ids] if feats else None
-            all_feats.append(self.prep(ids, tmp_feats, adj, layer_idx=layer_idx + 1))
+            all_feats.append(self.prep(ids, feats[ids] if feats else None, adj, layer_idx=layer_idx + 1))
         
         return all_feats
     
@@ -92,5 +90,5 @@ class GSSupervised(nn.Module):
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()
-        return preds
+        return preds, loss
 
