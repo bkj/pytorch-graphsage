@@ -45,7 +45,7 @@ edges.columns = ('src', 'trg')
 ages = ages[['uid', 'age']]
 
 targets = np.array(ages.age).astype(float).reshape(-1, 1)
-folds = np.random.choice(['train', 'val'], targets.shape[0], p=[0.8, 0.2])
+folds = np.random.choice(['train', 'val'], targets.shape[0], p=[0.5, 0.5])
 
 G = nx.from_edgelist(np.array(edges))
 adj = make_adjacency(G, folds, max_degree, train=False) # Adds dummy node

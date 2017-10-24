@@ -91,15 +91,15 @@ class NodeProblem(object):
             "test"  : np.where(self.folds == 'test')[0],
         }
         
-        # >>
-        # Drop some nodes from "train" nodes -- semi-supervised
-        alpha = 0.50 / 0.80
-        self.nodes['train'] = np.random.choice(
-            self.nodes['train'], 
-            size=int(self.nodes['train'].shape[0] * alpha)
-        )
-        print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
-        # <<
+        # # >>
+        # # Drop some nodes from "train" nodes -- semi-supervised
+        # alpha = 0.50 / 0.80
+        # self.nodes['train'] = np.random.choice(
+        #     self.nodes['train'], 
+        #     size=int(self.nodes['train'].shape[0] * alpha)
+        # )
+        # print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
+        # # <<
         
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
