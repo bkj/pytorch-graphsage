@@ -149,21 +149,21 @@ if __name__ == "__main__":
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
-            # print({
-            #     "epoch_progress" : epoch_progress,
-            #     "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
-            # })
-            # sys.stdout.flush()
+            print({
+                "epoch_progress" : epoch_progress,
+                "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
+            })
+            sys.stdout.flush()
         
         # Evaluate
         _ = model.eval()
-        # print('-- eval --', file=sys.stderr)
+        print('-- eval --', file=sys.stderr)
         print({
             "epoch" : epoch,
             "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
             "val_metric" : evaluate(model, problem, mode='val'),
         })
-        # print('----------', file=sys.stderr)
+        print('----------', file=sys.stderr)
         
     if args.show_test:
         print({"test_f1" : evaluate(model, problem, mode='test')})

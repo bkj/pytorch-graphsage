@@ -70,7 +70,7 @@ def make_adjacency(G, folds, max_degree, train=True):
         all_nodes = all_nodes[folds == 'train']
     
     for node in all_nodes:
-        neibs = np.array(G.neighbors(node))
+        neibs = np.array(list(G.neighbors(node)))
         
         if train:
             neibs = neibs[folds[neibs] == 'train']
