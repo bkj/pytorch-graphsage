@@ -11,7 +11,6 @@ import sys
 import json
 import argparse
 import numpy as np
-from time import time
 
 import torch
 from torch.autograd import Variable
@@ -140,8 +139,6 @@ if __name__ == "__main__":
     
     set_seeds(args.seed ** 2)
     
-    t = time()
-    
     for epoch in range(args.epochs):
         
         # Train
@@ -156,30 +153,28 @@ if __name__ == "__main__":
                 loss_fn=problem.loss_fn,
             )
             
-            print(time() - t)
-            
-    #         print(json.dumps({
-    #             "epoch" : epoch,
-    #             "epoch_progress" : epoch_progress,
-    #             # "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds)))
-    #             "train_loss" : loss.data[0],
-    #         }))
-    #         sys.stdout.flush()
+            print(json.dumps({
+                "epoch" : epoch,
+                "epoch_progress" : epoch_progress,
+                # "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds)))
+                "train_loss" : loss.data[0],
+            }))
+            sys.stdout.flush()
         
-    #     # Evaluate
-    #     _ = model.eval()
-    #     print(json.dumps({
-    #         "epoch" : epoch,
-    #         "epoch_progress" : epoch_progress,
-    #         "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds))),
-    #         "val_metric" : float(evaluate(model, problem, mode='val')),
-    #     }))
-    #     sys.stdout.flush()
+        # Evaluate
+        _ = model.eval()
+        print(json.dumps({
+            "epoch" : epoch,
+            "epoch_progress" : epoch_progress,
+            "train_metric" : float(problem.metric_fn(to_numpy(targets), to_numpy(preds))),
+            "val_metric" : float(evaluate(model, problem, mode='val')),
+        }))
+        sys.stdout.flush()
         
-    #     # Save
-    #     if args.checkpoint:
-    #         torch.save(model.state_dict(), '.checkpoint.gs')
+        # Save
+        if args.checkpoint:
+            torch.save(model.state_dict(), '.checkpoint.gs')
         
-    # if args.show_test:
-    #     print({"test_f1" : evaluate(model, problem, mode='test')})
+    if args.show_test:
+        print({"test_f1" : evaluate(model, problem, mode='test')})
 

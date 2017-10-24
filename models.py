@@ -58,10 +58,10 @@ class GSSupervised(nn.Module):
     def _sample(self, ids, feats, adj, train):
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        all_feats = [self.prep(ids, feats[ids] if feats is not None else None, adj, layer_idx=0)]
+        all_feats = [self.prep(ids, feats[ids] if feats else None, adj, layer_idx=0)]
         for layer_idx, sampler_fn in enumerate(sample_fns):
             ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
-            all_feats.append(self.prep(ids, feats[ids] if feats is not None else None, adj, layer_idx=layer_idx + 1))
+            all_feats.append(self.prep(ids, feats[ids] if feats else None, adj, layer_idx=layer_idx + 1))
         
         return all_feats
     
@@ -86,10 +86,9 @@ class GSSupervised(nn.Module):
     def train_step(self, ids, feats, adj, targets, loss_fn):
         self.optimizer.zero_grad()
         preds = self(ids, feats, adj)
-        # loss = loss_fn(preds, targets.squeeze())
-        # loss.backward()
-        # torch.nn.utils.clip_grad_norm(self.parameters(), 5)
-        # self.optimizer.step()
-        # return preds, loss
-        return None, None
+        loss = loss_fn(preds, targets.squeeze())
+        loss.backward()
+        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        self.optimizer.step()
+        return preds, loss
 
