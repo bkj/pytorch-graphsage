@@ -10,6 +10,7 @@ from __future__ import print_function
 import sys
 import argparse
 import numpy as np
+from time import time
 
 import torch
 from torch.autograd import Variable
@@ -18,27 +19,17 @@ from torch.nn import functional as F
 from models import GSSupervised
 from problem import NodeProblem
 from helpers import set_seeds, to_numpy
-from nn_modules import aggregator_lookup, prep_lookup
+from nn_modules import aggregator_lookup, prep_lookup, sampler_lookup
 from lr import LRSchedule
 
 # --
 # Helpers
 
-def uniform_neighbor_sampler(ids, adj, n_samples=-1):
-    tmp = adj[ids]
-    perm = torch.randperm(tmp.size(1))
-    if adj.is_cuda:
-        perm = perm.cuda()
-    
-    tmp = tmp[:,perm]
-    return tmp[:,:n_samples]
-
-
 def evaluate(model, problem, mode='val'):
     assert mode in ['test', 'val']
     preds, acts = [], []
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, problem.feats, problem.adj, train=True)))
+        preds.append(to_numpy(model(ids, problem.feats, train=True)))
         acts.append(to_numpy(targets))
     
     return problem.metric_fn(np.vstack(acts), np.vstack(preds))
@@ -60,8 +51,10 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=0.0)
     
     # Architecture params
+    parser.add_argument('--sampler-class', type=str, default='uniform_neighbor_sampler')
     parser.add_argument('--aggregator-class', type=str, default='mean')
     parser.add_argument('--prep-class', type=str, default='identity')
+    
     parser.add_argument('--n-train-samples', type=str, default='25,10')
     parser.add_argument('--n-val-samples', type=str, default='25,10')
     parser.add_argument('--output-dims', type=str, default='128,128')
@@ -81,6 +74,7 @@ def parse_args():
     assert args.batch_size > 1, 'parse_args: batch_size must be > 1'
     return args
 
+
 if __name__ == "__main__":
     args = parse_args()
     set_seeds(args.seed)
@@ -97,6 +91,10 @@ if __name__ == "__main__":
     n_val_samples = map(int, args.n_val_samples.split(','))
     output_dims = map(int, args.output_dims.split(','))
     model = GSSupervised(**{
+        "sampler_class" : sampler_lookup[args.sampler_class],
+        "adj" : problem.adj,
+        "train_adj" : problem.train_adj,
+        
         "prep_class" : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
@@ -105,14 +103,12 @@ if __name__ == "__main__":
         "n_classes" : problem.n_classes,
         "layer_specs" : [
             {
-                "sample_fn" : uniform_neighbor_sampler,
                 "n_train_samples" : n_train_samples[0],
                 "n_val_samples" : n_val_samples[0],
                 "output_dim" : output_dims[0],
                 "activation" : F.relu,
             },
             {
-                "sample_fn" : uniform_neighbor_sampler,
                 "n_train_samples" : n_train_samples[1],
                 "n_val_samples" : n_val_samples[1],
                 "output_dim" : output_dims[1],
@@ -135,7 +131,7 @@ if __name__ == "__main__":
     
     set_seeds(args.seed ** 2)
     
-    val_f1 = None
+    start_time = time()
     for epoch in range(args.epochs):
         
         # Train
@@ -145,13 +141,13 @@ if __name__ == "__main__":
             preds = model.train_step(
                 ids=ids, 
                 feats=problem.feats,
-                adj=problem.train_adj,
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
             print({
                 "epoch_progress" : epoch_progress,
-                "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds))
+                "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
+                "time" : time() - start_time,
             })
             sys.stdout.flush()
         
@@ -162,6 +158,7 @@ if __name__ == "__main__":
             "epoch" : epoch,
             "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
             "val_metric" : evaluate(model, problem, mode='val'),
+            "time" : time() - start_time,
         })
         print('----------', file=sys.stderr)
         

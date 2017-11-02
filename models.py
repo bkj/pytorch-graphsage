@@ -19,16 +19,35 @@ from lr import LRSchedule
 # Model
 
 class GSSupervised(nn.Module):
-    def __init__(self, input_dim, n_nodes, n_classes, layer_specs, aggregator_class, prep_class, 
-        lr_init=0.01, weight_decay=0.0, lr_schedule='constant', epochs=10):
+    def __init__(self,
+        input_dim,
+        n_nodes,
+        n_classes,
+        layer_specs, 
+        aggregator_class, 
+        prep_class, 
+        sampler_class, adj, train_adj,
+        lr_init=0.01,
+        weight_decay=0.0,
+        lr_schedule='constant',
+        epochs=10):
+        
         super(GSSupervised, self).__init__()
         
         # --
         # Define network
         
+        # Sampler
+        self.train_sampler = sampler_class(adj=train_adj)
+        self.val_sampler = sampler_class(adj=adj)
+        self.train_sample_fns = [partial(self.train_sampler, n_samples=s['n_train_samples']) for s in layer_specs]
+        self.val_sample_fns = [partial(self.val_sampler, n_samples=s['n_val_samples']) for s in layer_specs]
+        
+        # Prep
         self.prep = prep_class(input_dim=input_dim, n_nodes=n_nodes)
         input_dim = self.prep.output_dim
         
+        # Network
         agg_layers = []
         for spec in layer_specs:
             agg = aggregator_class(
@@ -43,33 +62,22 @@ class GSSupervised(nn.Module):
         self.fc = nn.Linear(input_dim, n_classes, bias=True)
         
         # --
-        # Setup samplers
-        
-        self.train_sample_fns = [partial(s['sample_fn'], n_samples=s['n_train_samples']) for s in layer_specs]
-        self.val_sample_fns = [partial(s['sample_fn'], n_samples=s['n_val_samples']) for s in layer_specs]
-        
-        # --
         # Define optimizer
         
         self.lr_scheduler = partial(getattr(LRSchedule, lr_schedule), lr_init=lr_init)
         self.lr = self.lr_scheduler(0.0)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
     
-    def _sample(self, ids, feats, adj, train):
+    def forward(self, ids, feats, train=True):
+        # Sample neighbors
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
         tmp_feats = feats[ids] if feats else None
-        all_feats = [self.prep(ids, tmp_feats, adj, layer_idx=0)]
+        all_feats = [self.prep(ids, tmp_feats, layer_idx=0)]
         for layer_idx, sampler_fn in enumerate(sample_fns):
-            ids = sampler_fn(ids=ids, adj=adj).contiguous().view(-1)
+            ids = sampler_fn(ids=ids).contiguous().view(-1)
             tmp_feats = feats[ids] if feats else None
-            all_feats.append(self.prep(ids, tmp_feats, adj, layer_idx=layer_idx + 1))
-        
-        return all_feats
-    
-    def forward(self, ids, feats, adj, train=True):
-        # Sample neighbors + apply `prep_class`
-        all_feats = self._sample(ids, feats, adj, train=train)
+            all_feats.append(self.prep(ids, tmp_feats, layer_idx=layer_idx + 1))
         
         # Sequentially apply layers, per original (little weird, IMO)
         # Each iteration reduces length of array by one
@@ -78,16 +86,16 @@ class GSSupervised(nn.Module):
         
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
-        out = F.normalize(all_feats[0], dim=1) # ??
+        out = F.normalize(all_feats[0], dim=1) # ?? Do we actually want this? ... Sometimes ...
         return self.fc(out)
     
     def set_progress(self, progress):
         self.lr = self.lr_scheduler(progress)
         LRSchedule.set_lr(self.optimizer, self.lr)
     
-    def train_step(self, ids, feats, adj, targets, loss_fn):
+    def train_step(self, ids, feats, targets, loss_fn):
         self.optimizer.zero_grad()
-        preds = self(ids, feats, adj)
+        preds = self(ids, feats, train=True)
         loss = loss_fn(preds, targets.squeeze())
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)

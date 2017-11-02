@@ -66,12 +66,4 @@ problem = {
 }
 
 
-assert validate_problem(problem)
-
-f = h5py.File(outpath)
-for k,v in problem.items():
-    if v is not None:
-        print k
-        f[k] = v
-
-f.close()
+save_problem(problem, outpath)

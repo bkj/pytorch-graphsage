@@ -10,6 +10,74 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 
 # --
+# Samplers
+
+class UniformNeighborSampler(object):
+    def __init__(self, adj):
+        self.adj = adj
+        self.is_cuda = adj.is_cuda
+    
+    def __call__(self, ids, n_samples=-1):
+        tmp = self.adj[ids]
+        perm = torch.randperm(tmp.size(1))
+        if self.is_cuda:
+            perm = perm.cuda()
+        
+        tmp = tmp[:,perm]
+        return tmp[:,:n_samples]
+
+from scipy.sparse import csr_matrix
+from tqdm import tqdm
+from helpers import to_numpy
+import pandas as pd
+import numpy as np
+
+class SparseUniformNeighborSampler(object):
+    def __init__(self, adj):
+        self.is_cuda = adj.is_cuda
+        
+        # Convert adj to sparse format
+        adj = to_numpy(adj)
+        
+        for i in tqdm(range(adj.shape[0])):
+            uneibs = list(set(adj[i]))
+            adj[i] = uneibs + [-1] * (adj.shape[1] - len(uneibs))
+        
+        adj = csr_matrix(adj + 1)
+        
+        # Compute degrees
+        degrees = pd.value_counts(adj.nonzero()[0], sort=False)
+        degrees = np.array(degrees.iloc[np.argsort(degrees.index)])
+        
+        self.adj = adj
+        self.degrees = degrees
+    
+    def __call__(self, ids, n_samples=128):
+        assert n_samples > 0, 'SparseUniformNeighborSampler: n_samples must be set explicitly'
+        
+        ids = to_numpy(ids)
+        
+        tmp  = self.adj[ids]
+        inds = np.random.choice(self.adj.shape[1], (ids.shape[0], n_samples)) % self.degrees[ids].reshape(-1, 1)
+        
+        tmp = tmp[
+            np.arange(ids.shape[0]).repeat(n_samples).reshape(-1),
+            np.array(inds).reshape(-1)
+        ]
+        tmp = np.asarray(tmp).squeeze() - 1
+        tmp = Variable(torch.LongTensor(tmp))
+        
+        if self.is_cuda:
+            tmp = tmp.cuda()
+        
+        return tmp
+
+sampler_lookup = {
+    "uniform_neighbor_sampler" : UniformNeighborSampler,
+    "sparse_uniform_neighbor_sampler" : SparseUniformNeighborSampler,
+}
+
+# --
 # Preprocessers
 
 class IdentityPrep(nn.Module):
@@ -22,7 +90,7 @@ class IdentityPrep(nn.Module):
     def output_dim(self):
         return self.input_dim
     
-    def forward(self, ids, feats, adj):
+    def forward(self, ids, feats):
         return feats
 
 
@@ -44,7 +112,7 @@ class NodeEmbeddingPrep(nn.Module):
         else:
             return self.embedding_dim
     
-    def forward(self, ids, feats, adj, layer_idx=0):
+    def forward(self, ids, feats, layer_idx=0):
         if layer_idx > 0:
             embs = self.embedding(ids)
         else:
@@ -65,7 +133,7 @@ class LinearPrep(nn.Module):
         self.fc = nn.Linear(input_dim, output_dim, bias=False)
         self.output_dim = output_dim
     
-    def forward(self, ids, feats, adj):
+    def forward(self, ids, feats):
         return self.fc(feats)
 
 
