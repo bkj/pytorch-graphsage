@@ -72,8 +72,10 @@ class SparseUniformNeighborSampler(object):
     def __init__(self, adj,):
         assert sparse.issparse(adj), "SparseUniformNeighborSampler: not sparse.issparse(adj)"
         self.adj = adj
-        _, degrees = np.unique(adj.nonzero()[0], return_counts=True)
-        self.degrees = np.concatenate([[0], degrees]) # Add degrees for dummy node
+        
+        idx, partial_degrees = np.unique(adj.nonzero()[0], return_counts=True)
+        self.degrees = np.zeros(adj.shape[0]).astype(int)
+        self.degrees[idx] = partial_degrees
         
     def __call__(self, ids, n_samples=128):
         assert n_samples > 0, 'SparseUniformNeighborSampler: n_samples must be set explicitly'

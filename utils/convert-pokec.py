@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import pandas as pd
 import networkx as nx
-from convert import make_adjacency, make_sparse_adjacency, save_problem
+from convert import make_adjacency, make_sparse_adjacency, save_problem, spadj2edgelist
 
 np.random.seed(123)
 
@@ -71,9 +71,6 @@ save_problem({
 
 
 spadj = make_sparse_adjacency(G, sel=None)
-spadj_v = spadj.data
-spadj_r, spadj_c = spadj.nonzero()
-
 aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='float64'), targets])
 aug_folds   = np.hstack([['dummy'], folds])
 
@@ -83,8 +80,8 @@ save_problem({
     "feats"     : None,
     
     "sparse"    : True,
-    "adj"       : np.vstack([spadj_v, spadj_r, spadj_c]),
-    "train_adj" : np.vstack([spadj_v, spadj_r, spadj_c]),
+    "adj"       : spadj2edgelist(spadj),
+    "train_adj" : spadj2edgelist(spadj),
     
     "targets"   : aug_targets,
     "folds"     : aug_folds,
