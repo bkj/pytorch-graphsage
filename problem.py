@@ -12,7 +12,9 @@ import sys
 import h5py
 import cPickle
 import numpy as np
+from scipy import sparse
 from sklearn import metrics
+from scipy.sparse import csr_matrix
 
 import torch
 from torch.autograd import Variable
@@ -65,6 +67,10 @@ class ProblemMetrics:
 # --
 # Problem definition
 
+def parse_csr_matrix(x):
+    v, r, c = x
+    return csr_matrix((v, (r, c)))
+
 class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
@@ -76,8 +82,14 @@ class NodeProblem(object):
         self.feats     = f['feats'].value if 'feats' in f else None
         self.folds     = f['folds'].value
         self.targets   = f['targets'].value
-        self.adj       = f['adj'].value
-        self.train_adj = f['train_adj'].value
+        if 'sparse' in f and f['sparse'].value:
+            print('sparse!')
+            self.adj = parse_csr_matrix(f['adj'].value)
+            self.train_adj = parse_csr_matrix(f['train_adj'].value)
+        else:
+            self.adj = f['adj'].value
+            self.train_adj = f['train_adj'].value
+            
         f.close()
         
         self.feats_dim = self.feats.shape[1] if self.feats else None
@@ -91,31 +103,22 @@ class NodeProblem(object):
             "test"  : np.where(self.folds == 'test')[0],
         }
         
-        # # >>
-        # # Drop some nodes from "train" nodes -- semi-supervised
-        # alpha = 0.50 / 0.80
-        # self.nodes['train'] = np.random.choice(
-        #     self.nodes['train'], 
-        #     size=int(self.nodes['train'].shape[0] * alpha)
-        # )
-        # print("self.nodes['train'].shape[0]", self.nodes['train'].shape[0])
-        # # <<
-        
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
         print('NodeProblem: loading finished')
     
     def __to_torch(self):
-        self.train_adj = Variable(torch.LongTensor(self.train_adj))
-        self.adj = Variable(torch.LongTensor(self.adj))
+        if not sparse.issparse(self.adj):
+            self.adj = Variable(torch.LongTensor(self.adj))
+            self.train_adj = Variable(torch.LongTensor(self.train_adj))
+            if self.cuda:
+                self.adj = self.adj.cuda()
+                self.train_adj = self.train_adj.cuda()
+        
         if self.feats:
             self.feats = Variable(torch.FloatTensor(self.feats))
-        
-        if self.cuda:
-            self.train_adj = self.train_adj.cuda()
-            self.adj = self.adj.cuda()
-            if self.feats:
+            if self.cuda:
                 self.feats = self.feats.cuda()
     
     def __batch_to_torch(self, mids, targets):

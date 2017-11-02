@@ -1,8 +1,12 @@
+# !! Need to update this
+
 import h5py
 import networkx as nx
 import numpy as np
 from scipy import sparse as sp
 import pandas as pd
+
+from convert import make_adjacency
 
 def encode_onehot(labels):
     ulabels = set(labels)
@@ -51,35 +55,6 @@ def get_splits(y):
     y_test[idx_test] = y[idx_test]
     
     return y_train, y_val, y_test, idx_train, idx_val, idx_test
-
-
-def make_adjacency(G, folds, max_degree, train=True):
-    
-    all_nodes = np.array(G.nodes())
-    
-    # Initialize w/ links to a dummy node
-    n_nodes = len(all_nodes)
-    adj = (np.zeros((n_nodes + 1, max_degree)) + n_nodes).astype(int)
-    
-    if train:
-        # only look at nodes in training set
-        all_nodes = all_nodes[folds == 'train']
-    
-    for node in all_nodes:
-        neibs = np.array(G.neighbors(node))
-        
-        if train:
-            neibs = neibs[folds[neibs] == 'train']
-        
-        if len(neibs) > 0:
-            if len(neibs) > max_degree:
-                neibs = np.random.choice(neibs, max_degree, replace=False)
-            elif len(neibs) < max_degree:
-                neibs = np.random.choice(neibs, max_degree, replace=True)
-            
-            adj[node, :] = neibs
-    
-    return adj
 
 # --
 # IO

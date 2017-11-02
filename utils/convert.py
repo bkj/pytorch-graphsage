@@ -16,7 +16,9 @@ import cPickle
 import argparse
 import numpy as np
 import ujson as json
+from tqdm import tqdm
 import networkx as nx
+from scipy.sparse import csr_matrix
 from networkx.readwrite import json_graph
 from sklearn.preprocessing import StandardScaler
 
@@ -57,7 +59,7 @@ def save_problem(problem, outpath):
     f.close()
 
 
-def make_adjacency(G, folds, max_degree, train=True):
+def make_adjacency(G, max_degree, sel=None):
     
     all_nodes = np.array(G.nodes())
     
@@ -65,25 +67,54 @@ def make_adjacency(G, folds, max_degree, train=True):
     n_nodes = len(all_nodes)
     adj = (np.zeros((n_nodes + 1, max_degree)) + n_nodes).astype(int)
     
-    if train:
+    if sel is not None:
         # only look at nodes in training set
-        all_nodes = all_nodes[folds == 'train']
+        all_nodes = all_nodes[sel]
     
-    for node in all_nodes:
+    for node in tqdm(all_nodes):
         neibs = np.array(list(G.neighbors(node)))
         
-        if train:
-            neibs = neibs[folds[neibs] == 'train']
+        if sel is not None:
+            neibs = neibs[sel[neibs]]
         
         if len(neibs) > 0:
             if len(neibs) > max_degree:
                 neibs = np.random.choice(neibs, max_degree, replace=False)
             elif len(neibs) < max_degree:
-                neibs = np.random.choice(neibs, max_degree, replace=True)
+                extra = np.random.choice(neibs, max_degree - neibs.shape[0], replace=True)
+                neibs = np.concatenate([neibs, extra])
             
             adj[node, :] = neibs
     
     return adj
+
+def make_sparse_adjacency(G, sel=None):
+    
+    all_nodes = np.array(G.nodes())
+    
+    r, c, v = [], [], []
+    
+    if sel is not None:
+        all_nodes = all_nodes[sel]
+    
+    for node in tqdm(all_nodes):
+        neibs = np.array(list(G.neighbors(node)))
+        
+        if sel is not None:
+            neibs = neibs[sel[neibs]]
+        
+        if len(neibs) > 0:
+            r.append(node + np.zeros(len(neibs)).astype(int) + 1)
+            c.append(np.arange(len(neibs)))
+            v.append(neibs + 1)
+    
+    return csr_matrix((
+        np.hstack(v),
+        (
+            np.hstack(r),
+            np.hstack(c),
+        )
+    ))
 
 
 def parse_args():
@@ -128,8 +159,8 @@ if __name__ == "__main__":
     
     
     print('making adjacency lists', file=sys.stderr)
-    adj = make_adjacency(G, folds, args.max_degree, train=False) # Adds dummy node
-    train_adj = make_adjacency(G, folds, args.max_degree, train=True) # Adds dummy node
+    adj = make_adjacency(G, folds, args.max_degree, train=None) # Adds dummy node
+    train_adj = make_adjacency(G, args.max_degree, train=(folds == 'train')) # Adds dummy node
     feats = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
     
     
