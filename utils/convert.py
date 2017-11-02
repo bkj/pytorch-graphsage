@@ -197,26 +197,26 @@ if __name__ == "__main__":
         "folds"     : aug_folds,
     }, args.outpath)
 
-    # >>
-    print('making sparse adjacency lists', file=sys.stderr)
-    adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
-    train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
+    # # >>
+    # print('making sparse adjacency lists', file=sys.stderr)
+    # adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
+    # train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
 
-    aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
-    aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
-    aug_folds   = np.hstack([['dummy'], folds])
+    # aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
+    # aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
+    # aug_folds   = np.hstack([['dummy'], folds])
 
-    print('saving -> %s' % args.outpath, file=sys.stderr)
-    save_problem({
-        "task"      : args.task,
-        "n_classes" : n_classes,
+    # print('saving -> %s' % args.outpath, file=sys.stderr)
+    # save_problem({
+    #     "task"      : args.task,
+    #     "n_classes" : n_classes,
         
-        "sparse"    : True,
-        "adj"       : spadj2edgelist(adj),
-        "train_adj" : spadj2edgelist(train_adj),
+    #     "sparse"    : True,
+    #     "adj"       : spadj2edgelist(adj),
+    #     "train_adj" : spadj2edgelist(train_adj),
         
-        "feats"     : aug_feats,
-        "targets"   : aug_targets,
-        "folds"     : aug_folds,
-    }, './data/reddit/sparse-problem.h5')
-    # <<
+    #     "feats"     : aug_feats,
+    #     "targets"   : aug_targets,
+    #     "folds"     : aug_folds,
+    # }, './data/reddit/sparse-problem.h5')
+    # # <<
