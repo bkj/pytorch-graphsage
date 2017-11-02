@@ -16,6 +16,11 @@ time python ./train.py \
     --aggregator-class mean \
     --sampler-class sparse_uniform_neighbor_sampler
 
+time python ./train.py \
+    --problem-path ./data/reddit/sparse-full-problem.h5 \
+    --aggregator-class mean \
+    --sampler-class sparse_uniform_neighbor_sampler
+
 # <<
 
 time ./train.py \
