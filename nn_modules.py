@@ -9,10 +9,33 @@ from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Variable
 
+import numpy as np
+from scipy import sparse
+from helpers import to_numpy
+
 # --
 # Samplers
 
 class UniformNeighborSampler(object):
+    """
+        Samples from a "dense 2D edgelist", which looks like
+        
+            [
+                [1, 2, 3, ..., 1],
+                [1, 3, 3, ..., 3],
+                ...
+            ]
+        
+        stored as torch.LongTensor. 
+        
+        This relies on a preprocessing step where we sample _exactly_ K neighbors
+        for each node -- if the node has less than K neighbors, we upsample w/ replacement
+        and if the node has more than K neighbors, we downsample w/o replacement.
+        
+        This seems like a "definitely wrong" thing to do -- but it runs pretty fast, and
+        I don't know what kind of degradation it causes in practice.
+    """
+    
     def __init__(self, adj):
         self.adj = adj
     
@@ -25,69 +48,26 @@ class UniformNeighborSampler(object):
         tmp = tmp[:,perm]
         return tmp[:,:n_samples]
 
-import numpy as np
-from scipy import sparse
-from helpers import to_numpy
-# from scipy.sparse import csr_matrix
-# from tqdm import tqdm
-# import pandas as pd
-
-
-# class SparseUniformNeighborSampler(object):
-#     def __init__(self, adj):
-#         self.is_cuda = adj.is_cuda
-        
-#         # Convert adj to sparse format
-#         adj = to_numpy(adj)
-        
-#         for i in tqdm(range(adj.shape[0])):
-#             uneibs = list(set(adj[i]))
-#             adj[i] = uneibs + [-1] * (adj.shape[1] - len(uneibs))
-        
-#         adj = csr_matrix(adj + 1)
-        
-#         # Compute degrees
-#         degrees = pd.value_counts(adj.nonzero()[0], sort=False)
-#         degrees = np.array(degrees.iloc[np.argsort(degrees.index)])
-        
-#         self.adj = adj
-#         self.degrees = degrees
-    
-#     def __call__(self, ids, n_samples=128):
-#         assert n_samples > 0, 'SparseUniformNeighborSampler: n_samples must be set explicitly'
-        
-#         ids = to_numpy(ids)
-        
-#         tmp  = self.adj[ids]
-#         inds = np.random.choice(self.adj.shape[1], (ids.shape[0], n_samples)) % self.degrees[ids].reshape(-1, 1)
-        
-#         tmp = tmp[
-#             np.arange(ids.shape[0]).repeat(n_samples).reshape(-1),
-#             np.array(inds).reshape(-1)
-#         ]
-#         tmp = np.asarray(tmp).squeeze() - 1
-#         tmp = Variable(torch.LongTensor(tmp))
-        
-#         if self.is_cuda:
-#             tmp = tmp.cuda()
-        
-#         return tmp
-
 
 class SparseUniformNeighborSampler(object):
     """
         Samples from "sparse 2D edgelist", which looks like
+        
             [
                 [0, 0, 0, 0, ..., 0],
                 [1, 2, 3, 0, ..., 0],
                 [1, 3, 0, 0, ..., 0],
                 ...
             ]
-        stored as a CSR matrix.
+        
+        stored as a scipy.sparse.csr_matrix.
         
         The first row is a "dummy node", so there's an "off-by-one" issue vs `feats`.
         Have to increment/decrement by 1 in a couple of places.  In the regular
         uniform sampler, this "dummy node" is at the end.
+        
+        Ideally, obviously, we'd be doing this sampling on the GPU.  But it does not
+        appear that torch.sparse.LongTensor can support this ATM.
     """
     def __init__(self, adj,):
         assert sparse.issparse(adj), "SparseUniformNeighborSampler: not sparse.issparse(adj)"
