@@ -46,22 +46,22 @@ class ProblemMetrics:
     def multilabel_classification(y_true, y_pred):
         y_pred = (y_pred > 0).astype(int)
         return {
-            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+            "micro" : float(metrics.f1_score(y_true, y_pred, average="micro")),
+            "macro" : float(metrics.f1_score(y_true, y_pred, average="macro")),
         }
     
     @staticmethod
     def classification(y_true, y_pred):
         y_pred = np.argmax(y_pred, axis=1)
         return {
-            "micro" : metrics.f1_score(y_true, y_pred, average="micro"),
-            "macro" : metrics.f1_score(y_true, y_pred, average="macro"),
+            "micro" : float(metrics.f1_score(y_true, y_pred, average="micro")),
+            "macro" : float(metrics.f1_score(y_true, y_pred, average="macro")),
         }
         # return (y_pred == y_true.squeeze()).mean()
     
     @staticmethod
     def regression_mae(y_true, y_pred):
-        return np.abs(y_true - y_pred).mean()
+        return float(np.abs(y_true - y_pred).mean())
 
 
 # --
@@ -83,7 +83,6 @@ class NodeProblem(object):
         self.folds     = f['folds'].value
         self.targets   = f['targets'].value
         if 'sparse' in f and f['sparse'].value:
-            print('sparse!')
             self.adj = parse_csr_matrix(f['adj'].value)
             self.train_adj = parse_csr_matrix(f['train_adj'].value)
         else:
@@ -92,7 +91,7 @@ class NodeProblem(object):
             
         f.close()
         
-        self.feats_dim = self.feats.shape[1] if self.feats else None
+        self.feats_dim = self.feats.shape[1] if self.feats is not None else None
         self.n_nodes   = self.adj.shape[0]
         self.cuda      = cuda
         self.__to_torch()
@@ -116,7 +115,7 @@ class NodeProblem(object):
                 self.adj = self.adj.cuda()
                 self.train_adj = self.train_adj.cuda()
         
-        if self.feats:
+        if self.feats is not None:
             self.feats = Variable(torch.FloatTensor(self.feats))
             if self.cuda:
                 self.feats = self.feats.cuda()

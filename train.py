@@ -9,6 +9,7 @@ from __future__ import print_function
 
 import sys
 import argparse
+import ujson as json
 import numpy as np
 from time import time
 
@@ -29,7 +30,7 @@ def evaluate(model, problem, mode='val'):
     assert mode in ['test', 'val']
     preds, acts = [], []
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, problem.feats, train=True)))
+        preds.append(to_numpy(model(ids, problem.feats, train=False)))
         acts.append(to_numpy(targets))
     
     return problem.metric_fn(np.vstack(acts), np.vstack(preds))
@@ -132,6 +133,7 @@ if __name__ == "__main__":
     set_seeds(args.seed ** 2)
     
     start_time = time()
+    val_metric = None
     for epoch in range(args.epochs):
         
         # Train
@@ -144,24 +146,32 @@ if __name__ == "__main__":
                 targets=targets,
                 loss_fn=problem.loss_fn,
             )
-            print({
+            
+            train_metric = problem.metric_fn(to_numpy(targets), to_numpy(preds))
+            print(json.dumps({
+                "epoch" : epoch,
                 "epoch_progress" : epoch_progress,
-                "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
+                "train_metric" : train_metric,
+                "val_metric" : val_metric,
                 "time" : time() - start_time,
-            })
+            }, double_precision=5))
             sys.stdout.flush()
         
         # Evaluate
         _ = model.eval()
-        print('-- eval --', file=sys.stderr)
-        print({
-            "epoch" : epoch,
-            "train_metric" : problem.metric_fn(to_numpy(targets), to_numpy(preds)),
-            "val_metric" : evaluate(model, problem, mode='val'),
-            "time" : time() - start_time,
-        })
-        print('----------', file=sys.stderr)
-        
+        val_metric = evaluate(model, problem, mode='val')
+    
+    print('-- done --', file=sys.stderr)
+    print(json.dumps({
+        "epoch" : epoch,
+        "train_metric" : train_metric,
+        "val_metric" : val_metric,
+        "time" : time() - start_time,
+    }, double_precision=5))
+    sys.stdout.flush()
+    
     if args.show_test:
-        print({"test_f1" : evaluate(model, problem, mode='test')})
+        print(json.dumps({
+            "test_f1" : evaluate(model, problem, mode='test')
+        }, double_precision=5))
 

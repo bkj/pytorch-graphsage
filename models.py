@@ -72,11 +72,12 @@ class GSSupervised(nn.Module):
         # Sample neighbors
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
-        tmp_feats = feats[ids] if feats else None
+        has_feats = feats is not None
+        tmp_feats = feats[ids] if has_feats else None
         all_feats = [self.prep(ids, tmp_feats, layer_idx=0)]
         for layer_idx, sampler_fn in enumerate(sample_fns):
             ids = sampler_fn(ids=ids).contiguous().view(-1)
-            tmp_feats = feats[ids] if feats else None
+            tmp_feats = feats[ids] if has_feats else None
             all_feats.append(self.prep(ids, tmp_feats, layer_idx=layer_idx + 1))
         
         # Sequentially apply layers, per original (little weird, IMO)

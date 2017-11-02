@@ -22,6 +22,8 @@ from scipy.sparse import csr_matrix
 from networkx.readwrite import json_graph
 from sklearn.preprocessing import StandardScaler
 
+assert int(nx.__version__.split('.')[0]) < 2, "networkx major version > 1"
+
 # --
 # Helpers
 
@@ -34,18 +36,18 @@ def parse_fold(x):
         return 'train'
 
 def validate_problem(problem):
-    assert problem['adj'] is not None
-    assert problem['train_adj'] is not None
-    assert problem['targets'] is not None
-    assert problem['folds'] is not None
+    assert problem['adj'] is not None, "problem['adj'] is None"
+    assert problem['train_adj'] is not None, "problem['train_adj'] is None"
+    assert problem['targets'] is not None, "problem['targets'] is None"
+    assert problem['folds'] is not None, "problem['folds'] is None"
     
     if problem['feats'] is not None:
-        assert problem['feats'].shape[0] == problem['targets'].shape[0]
-        assert problem['feats'].shape[0] == problem['folds'].shape[0]
-        assert problem['adj'].shape[0] == (problem['feats'].shape[0] + 1)
+        assert problem['feats'].shape[0] == problem['targets'].shape[0], "problem['feats'].shape[0] != (problem['targets'].shape[0]"
+        assert problem['feats'].shape[0] == problem['folds'].shape[0], "problem['feats'].shape[0] != (problem['folds'].shape[0]"
+        assert problem['adj'].shape[0] == problem['feats'].shape[0], "problem['adj'].shape[0] != problem['feats'].shape[0]"
     
-    assert problem['adj'].shape[0] == problem['train_adj'].shape[0]
-    assert len(problem['targets'].shape) == 2
+    assert problem['adj'].shape[0] == problem['train_adj'].shape[0], "problem['adj'].shape[0] != problem['train_adj'].shape[0]"
+    assert len(problem['targets'].shape) == 2, "len(problem['targets'].shape) != 2"
     return True
 
 def save_problem(problem, outpath):
@@ -104,9 +106,9 @@ def make_sparse_adjacency(G, sel=None):
             neibs = neibs[sel[neibs]]
         
         if len(neibs) > 0:
-            r.append(node + np.zeros(len(neibs)).astype(int) + 1)
+            r.append(node + np.zeros(len(neibs)).astype(int) + 1) # Off-by-one
             c.append(np.arange(len(neibs)))
-            v.append(neibs + 1)
+            v.append(neibs + 1) # Off-by-one
     
     return csr_matrix((
         np.hstack(v),
@@ -123,11 +125,12 @@ def parse_args():
     parser.add_argument('--outpath', type=str)
     parser.add_argument('--max-degree', type=int, default=128)
     parser.add_argument('--task', type=str, default='classification')
-
+    
     args = parser.parse_args()
     assert args.task in ['classification', 'multilabel_classification'], 'unknown args.task'
     if not args.outpath:
         args.outpath = os.path.join(args.inpath, 'problem.h5')
+    
     return args
 
 
@@ -159,10 +162,12 @@ if __name__ == "__main__":
     
     
     print('making adjacency lists', file=sys.stderr)
-    adj = make_adjacency(G, folds, args.max_degree, train=None) # Adds dummy node
-    train_adj = make_adjacency(G, args.max_degree, train=(folds == 'train')) # Adds dummy node
-    feats = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
+    adj = make_adjacency(G, args.max_degree, sel=None) # Adds dummy node
+    train_adj = make_adjacency(G, args.max_degree, sel=(folds == 'train')) # Adds dummy node
     
+    aug_feats   = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
+    aug_targets = np.vstack([targets, np.zeros((targets.shape[1],), dtype='int64')])
+    aug_folds   = np.hstack([folds, ['dummy']])
     
     print('finishing up', file=sys.stderr)
     if args.task == 'classification':
@@ -173,14 +178,14 @@ if __name__ == "__main__":
         n_classes = None
     
     print('saving -> %s' % args.outpath, file=sys.stderr)
-    problem = {
+    save_problem({
         "task"      : args.task,
         "n_classes" : n_classes,
-        "feats"     : feats,
-        "train_adj" : train_adj,
+        
         "adj"       : adj,
-        "targets"   : targets,
-        "folds"     : folds,
-    }
-    
-    save_problem(problem, args.outpath)
+        "train_adj" : train_adj,
+        
+        "feats"     : aug_feats,
+        "targets"   : aug_targets,
+        "folds"     : aug_folds,
+    }, args.outpath)

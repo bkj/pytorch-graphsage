@@ -73,13 +73,13 @@ class SparseUniformNeighborSampler(object):
         assert sparse.issparse(adj), "SparseUniformNeighborSampler: not sparse.issparse(adj)"
         self.adj = adj
         _, degrees = np.unique(adj.nonzero()[0], return_counts=True)
-        self.degrees = np.concatenate([[0], degrees]) # Off-by-one -- be careful
+        self.degrees = np.concatenate([[0], degrees]) # Add degrees for dummy node
         
     def __call__(self, ids, n_samples=128):
         assert n_samples > 0, 'SparseUniformNeighborSampler: n_samples must be set explicitly'
         is_cuda = ids.is_cuda
         
-        ids = to_numpy(ids + 1) # Off-by-one -- be careful
+        ids = to_numpy(ids)
         
         tmp = self.adj[ids]
         
@@ -90,7 +90,6 @@ class SparseUniformNeighborSampler(object):
             np.array(sel).reshape(-1)
         ]
         tmp = np.asarray(tmp).squeeze() 
-        tmp -= 1 # Off-by-one -- be careful
         
         tmp = Variable(torch.LongTensor(tmp))
         
@@ -118,7 +117,7 @@ class IdentityPrep(nn.Module):
     def output_dim(self):
         return self.input_dim
     
-    def forward(self, ids, feats):
+    def forward(self, ids, feats, layer_idx=0):
         return feats
 
 
@@ -161,7 +160,7 @@ class LinearPrep(nn.Module):
         self.fc = nn.Linear(input_dim, output_dim, bias=False)
         self.output_dim = output_dim
     
-    def forward(self, ids, feats):
+    def forward(self, ids, feats, layer_idx=0):
         return self.fc(feats)
 
 
