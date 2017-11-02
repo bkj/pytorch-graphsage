@@ -75,6 +75,20 @@ from helpers import to_numpy
 
 
 class SparseUniformNeighborSampler(object):
+    """
+        Samples from "sparse 2D edgelist", which looks like
+            [
+                [0, 0, 0, 0, ..., 0],
+                [1, 2, 3, 0, ..., 0],
+                [1, 3, 0, 0, ..., 0],
+                ...
+            ]
+        stored as a CSR matrix.
+        
+        The first row is a "dummy node", so there's an "off-by-one" issue vs `feats`.
+        Have to increment/decrement by 1 in a couple of places.  In the regular
+        uniform sampler, this "dummy node" is at the end.
+    """
     def __init__(self, adj,):
         assert sparse.issparse(adj), "SparseUniformNeighborSampler: not sparse.issparse(adj)"
         self.adj = adj
