@@ -142,81 +142,81 @@ def parse_args():
     return args
 
 
-# if __name__ == "__main__":
-args = parse_args()
+if __name__ == "__main__":
+    args = parse_args()
 
-if os.path.exists(args.outpath):
-    print('backing up old problem.h5', file=sys.stderr)
-    _ = shutil.move(args.outpath, args.outpath + '.bak')
-
-
-print('loading <- %s' % args.inpath, file=sys.stderr)
-id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
-id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
-feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
-G         = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
+    if os.path.exists(args.outpath):
+        print('backing up old problem.h5', file=sys.stderr)
+        _ = shutil.move(args.outpath, args.outpath + '.bak')
 
 
-print('reordering')
-feats   = np.vstack([feats[id2idx[str(id)]] for id in G.nodes()])
-targets = np.vstack([id2target[str(id)] for id in G.nodes()])
-folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
-G       = nx.convert_node_labels_to_integers(G)
+    print('loading <- %s' % args.inpath, file=sys.stderr)
+    id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
+    id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
+    feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
+    G         = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
 
 
-print('normalizing feats', file=sys.stderr)
-scaler = StandardScaler().fit(feats[folds == 'train'])
-feats = scaler.transform(feats)
+    print('reordering')
+    feats   = np.vstack([feats[id2idx[str(id)]] for id in G.nodes()])
+    targets = np.vstack([id2target[str(id)] for id in G.nodes()])
+    folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
+    G       = nx.convert_node_labels_to_integers(G)
 
-print('n_classes', file=sys.stderr)
-if args.task == 'classification':
-    n_classes = len(np.unique(targets))
-elif args.task == 'multilabel_classification':
-    n_classes = targets.shape[1]
-elif 'regression' in args.task:
-    n_classes = None
 
-print('making adjacency lists', file=sys.stderr)
-adj = make_adjacency(G, args.max_degree, sel=None) # Adds dummy node
-train_adj = make_adjacency(G, args.max_degree, sel=(folds == 'train')) # Adds dummy node
+    print('normalizing feats', file=sys.stderr)
+    scaler = StandardScaler().fit(feats[folds == 'train'])
+    feats = scaler.transform(feats)
 
-aug_feats   = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
-aug_targets = np.vstack([targets, np.zeros((targets.shape[1],), dtype='int64')])
-aug_folds   = np.hstack([folds, ['dummy']])
+    print('n_classes', file=sys.stderr)
+    if args.task == 'classification':
+        n_classes = len(np.unique(targets))
+    elif args.task == 'multilabel_classification':
+        n_classes = targets.shape[1]
+    elif 'regression' in args.task:
+        n_classes = None
 
-print('saving -> %s' % args.outpath, file=sys.stderr)
-save_problem({
-    "task"      : args.task,
-    "n_classes" : n_classes,
-    
-    "adj"       : adj,
-    "train_adj" : train_adj,
-    
-    "feats"     : aug_feats,
-    "targets"   : aug_targets,
-    "folds"     : aug_folds,
-}, args.outpath)
+    print('making adjacency lists', file=sys.stderr)
+    adj = make_adjacency(G, args.max_degree, sel=None) # Adds dummy node
+    train_adj = make_adjacency(G, args.max_degree, sel=(folds == 'train')) # Adds dummy node
 
-# >>
-print('making sparse adjacency lists', file=sys.stderr)
-adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
-train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
+    aug_feats   = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
+    aug_targets = np.vstack([targets, np.zeros((targets.shape[1],), dtype='int64')])
+    aug_folds   = np.hstack([folds, ['dummy']])
 
-aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
-aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
-aug_folds   = np.hstack([['dummy'], folds])
+    print('saving -> %s' % args.outpath, file=sys.stderr)
+    save_problem({
+        "task"      : args.task,
+        "n_classes" : n_classes,
+        
+        "adj"       : adj,
+        "train_adj" : train_adj,
+        
+        "feats"     : aug_feats,
+        "targets"   : aug_targets,
+        "folds"     : aug_folds,
+    }, args.outpath)
 
-print('saving -> %s' % args.outpath, file=sys.stderr)
-save_problem({
-    "task"      : args.task,
-    "n_classes" : n_classes,
-    
-    "sparse"    : True,
-    "adj"       : spadj2edgelist(adj),
-    "train_adj" : spadj2edgelist(train_adj),
-    
-    "feats"     : aug_feats,
-    "targets"   : aug_targets,
-    "folds"     : aug_folds,
-}, './data/reddit/sparse-problem.h5')
-# <<
+    # >>
+    print('making sparse adjacency lists', file=sys.stderr)
+    adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
+    train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
+
+    aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
+    aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
+    aug_folds   = np.hstack([['dummy'], folds])
+
+    print('saving -> %s' % args.outpath, file=sys.stderr)
+    save_problem({
+        "task"      : args.task,
+        "n_classes" : n_classes,
+        
+        "sparse"    : True,
+        "adj"       : spadj2edgelist(adj),
+        "train_adj" : spadj2edgelist(train_adj),
+        
+        "feats"     : aug_feats,
+        "targets"   : aug_targets,
+        "folds"     : aug_folds,
+    }, './data/reddit/sparse-problem.h5')
+    # <<
