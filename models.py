@@ -18,21 +18,24 @@ from lr import LRSchedule
 # --
 # Model
 
-class GSSupervised(nn.Module):
+class GSModel(nn.Module):
+    
     def __init__(self,
         input_dim,
         n_nodes,
-        n_classes,
-        layer_specs, 
-        aggregator_class, 
-        prep_class, 
-        sampler_class, adj, train_adj,
+        layer_specs,
+        aggregator_class,
+        prep_class,
+        sampler_class,
+        adj,
+        train_adj,
+        n_classes=1,
         lr_init=0.01,
         weight_decay=0.0,
         lr_schedule='constant',
         epochs=10):
         
-        super(GSSupervised, self).__init__()
+        super(GSModel, self).__init__()
         
         # --
         # Define network
@@ -68,7 +71,11 @@ class GSSupervised(nn.Module):
         self.lr = self.lr_scheduler(0.0)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=weight_decay)
     
-    def forward(self, ids, feats, train=True):
+    def set_progress(self, progress):
+        self.lr = self.lr_scheduler(progress)
+        LRSchedule.set_lr(self.optimizer, self.lr)
+    
+    def forward(self, ids, feats, train):
         # Sample neighbors
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
@@ -89,17 +96,37 @@ class GSSupervised(nn.Module):
         
         out = F.normalize(all_feats[0], dim=1) # ?? Do we actually want this? ... Sometimes ...
         return self.fc(out)
-    
-    def set_progress(self, progress):
-        self.lr = self.lr_scheduler(progress)
-        LRSchedule.set_lr(self.optimizer, self.lr)
-    
+
+# --
+# Supervised model
+
+class GSSupervised(GSModel):
     def train_step(self, ids, feats, targets, loss_fn):
         self.optimizer.zero_grad()
+        
         preds = self(ids, feats, train=True)
         loss = loss_fn(preds, targets.squeeze())
+        
         loss.backward()
         torch.nn.utils.clip_grad_norm(self.parameters(), 5)
         self.optimizer.step()
+        
         return preds
 
+# --
+# Unsupervised model
+
+class GSUnsupervised(GSModel):
+    def train_step(self, anc_ids, pos_ids, neg_ids, feats, loss_fn):
+        self.optimizer.zero_grad()
+        
+        anc_emb = self(anc_ids, feats, train=True)
+        pos_emb = self(pos_ids, feats, train=True)
+        neg_emb = self(neg_ids, feats, train=True)
+        loss = loss_fn(anc_emb, pos_emb, neg_emb)
+        
+        loss.backward()
+        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        self.optimizer.step()
+        
+        return anc_emb, pos_emb, neg_emb

@@ -35,10 +35,6 @@ class ProblemLosses:
     @staticmethod
     def regression_mae(preds, targets):
         return F.l1_loss(preds, targets)
-        
-    # @staticmethod
-    # def regression_mse(preds, targets):
-    #     return F.mse_loss(preds - targets)
 
 
 class ProblemMetrics:
@@ -151,3 +147,114 @@ class NodeProblem(object):
             targets = self.targets[mids]
             mids, targets = self.__batch_to_torch(mids, targets)
             yield mids, targets, chunk_id / n_chunks
+
+# --
+# Unsupervised
+
+def bce_with_logits(logits, target):
+    # !! Is this right?
+    max_val = (-logits).clamp(min=0)
+    return logits - logits * target + max_val + ((-max_val).exp() + (-logits - max_val).exp()).log()
+
+
+class UnsupervisedLosses:
+    @staticmethod
+    def xent(anc_emb, pos_emb, neg_emb, neg_alpha=0.01):
+        
+        pos_sim = (anc_emb * pos_emb).sum(dim=1)
+        neg_sim = torch.mm(anc_emb, neg_emb.t())
+        
+        pos_loss = bce_with_logits(logits=pos_sim, target=1).sum()
+        neg_loss = bce_with_logits(logits=neg_sim, target=0).sum()
+        return pos_loss + neg_alpha * neg_loss
+
+
+class UnsupervisedMetrics:
+    @staticmethod
+    def xent(anc_emb, pos_emb, neg_emb, neg_alpha=0.01):
+        return 0
+
+
+class EdgeProblem(object):
+    def __init__(self, problem_path, cuda=True):
+        
+        print('EdgeProblem: loading started')
+        
+        f = h5py.File(problem_path)
+        self.task      = f['task'].value
+        self.n_classes = f['n_classes'].value if 'n_classes' in f else 1 # !!
+        self.feats     = f['feats'].value if 'feats' in f else None
+        self.folds     = f['folds'].value
+        # >>
+        # self.targets   = f['targets'].value
+        # <<
+        if 'sparse' in f and f['sparse'].value:
+            self.adj = parse_csr_matrix(f['adj'].value)
+            self.train_adj = parse_csr_matrix(f['train_adj'].value)
+        else:
+            self.adj = f['adj'].value
+            self.train_adj = f['train_adj'].value
+        
+        # >>
+        self.context_pairs = f['context_pairs'].value
+        # <<
+        
+        f.close()
+        
+        self.feats_dim = self.feats.shape[1] if self.feats is not None else None
+        self.n_nodes   = self.adj.shape[0]
+        self.cuda      = cuda
+        self.__to_torch()
+        
+        self.edges = {
+            "train" : np.where(self.folds == 'train')[0],
+            "val"   : np.where(self.folds == 'val')[0],
+            "test"  : np.where(self.folds == 'test')[0],
+        }
+        
+        self.loss_fn = getattr(UnsupervisedLosses, self.task)
+        self.metric_fn = getattr(UnsupervisedMetrics, self.task)
+        
+        print('EdgeProblem: loading finished')
+    
+    def __to_torch(self):
+        if not sparse.issparse(self.adj):
+            self.adj = Variable(torch.LongTensor(self.adj))
+            self.train_adj = Variable(torch.LongTensor(self.train_adj))
+            if self.cuda:
+                self.adj = self.adj.cuda()
+                self.train_adj = self.train_adj.cuda()
+        
+        if self.feats is not None:
+            self.feats = Variable(torch.FloatTensor(self.feats))
+            if self.cuda:
+                self.feats = self.feats.cuda()
+    
+    def __batch_to_torch(self, anc_ids, pos_ids, neg_ids):
+        """ convert batch to torch """
+        anc_ids = Variable(torch.LongTensor(anc_ids))
+        pos_ids = Variable(torch.LongTensor(pos_ids))
+        neg_ids = Variable(torch.LongTensor(neg_ids))
+        
+        if self.cuda:
+            anc_ids, pos_ids, neg_ids = anc_ids.cuda(), pos_ids.cuda(), neg_ids.cuda()
+        
+        return anc_ids, pos_ids, neg_ids
+    
+    def iterate(self, mode, batch_size=512, shuffle=False):
+        edges = self.edges[mode]
+        
+        idx = np.arange(edges.shape[0])
+        if shuffle:
+            idx = np.random.permutation(idx)
+        
+        n_chunks = idx.shape[0] // batch_size + 1
+        for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
+            anc_ids, pos_ids = edges[chunk]
+            neg_ids = self._sample_neg_ids(anc_ids, pos_ids)
+            
+            anc_ids, pos_ids, neg_ids = self.__batch_to_torch(anc_ids, pos_ids, neg_ids)
+            yield anc_ids, pos_ids, neg_ids, chunk_id / n_chunks
+
+
+
