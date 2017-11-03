@@ -187,6 +187,7 @@ class EdgeProblem(object):
         self.folds     = f['folds'].value
         # >>
         # self.targets   = f['targets'].value
+        self.context_pairs = f['context_pairs'].value
         # <<
         if 'sparse' in f and f['sparse'].value:
             self.adj = parse_csr_matrix(f['adj'].value)
@@ -194,10 +195,6 @@ class EdgeProblem(object):
         else:
             self.adj = f['adj'].value
             self.train_adj = f['train_adj'].value
-        
-        # >>
-        self.context_pairs = f['context_pairs'].value
-        # <<
         
         f.close()
         
@@ -240,6 +237,20 @@ class EdgeProblem(object):
             anc_ids, pos_ids, neg_ids = anc_ids.cuda(), pos_ids.cuda(), neg_ids.cuda()
         
         return anc_ids, pos_ids, neg_ids
+    
+    def _sample_neg_ids(self, anc_ids, pos_ids, n=None):
+        # ... need to sample negative _nodes_ ...
+        # figure out fixed_unigram_candidate_sampler
+        # self.neg_samples, _, _ = tf.nn.fixed_unigram_candidate_sampler(
+        #     true_classes=labels,
+        #     num_true=1,
+        #     num_sampled=FLAGS.neg_sample_size,
+        #     unique=False,
+        #     range_max=len(self.degrees),
+        #     distortion=0.75,
+        #     unigrams=self.degrees.tolist()
+        # )
+        raise NotImplemented
     
     def iterate(self, mode, batch_size=512, shuffle=False):
         edges = self.edges[mode]
