@@ -18,6 +18,9 @@ def set_seeds(seed=0):
 
 
 def to_numpy(x):
+    if isinstance(x, np.ndarray):
+        return x
+    
     if isinstance(x, Variable):
         return to_numpy(x.data)
     

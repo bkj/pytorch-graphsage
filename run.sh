@@ -48,3 +48,10 @@ time ./train.py \
 python ./train.py \
     --problem-path ./data/example_data/problem.h5 \
     --aggregator-class mean
+
+# --
+
+python ./utrain.py \
+    --problem-path ./data/example_data/problem.h5 \
+    --lr-init 0.00001
+

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-    train.py
+    utrain.py
 """
 
 from __future__ import division
@@ -11,14 +11,15 @@ import sys
 import argparse
 import ujson as json
 import numpy as np
+from tqdm import tqdm
 from time import time
 
 import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-from models import GSSupervised
-from problem import NodeProblem
+from models import GSUnsupervised
+from problem import EdgeProblem
 from helpers import set_seeds, to_numpy
 from nn_modules import aggregator_lookup, prep_lookup, sampler_lookup
 from lr import LRSchedule
@@ -28,12 +29,24 @@ from lr import LRSchedule
 
 def evaluate(model, problem, mode='val'):
     assert mode in ['test', 'val']
-    preds, acts = [], []
-    for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
-        preds.append(to_numpy(model(ids, problem.feats, train=False)))
-        acts.append(to_numpy(targets))
+    metrics = []
+    for (anc_ids, pos_ids, neg_ids, _) in tqdm(problem.iterate_edges(mode=mode, shuffle=False)):
+        metrics.append(problem.metric_fn(
+            model(anc_ids, problem.feats, train=False),
+            model(pos_ids, problem.feats, train=False),
+            model(neg_ids, problem.feats, train=False),
+        ))
     
-    return problem.metric_fn(np.vstack(acts), np.vstack(preds))
+    return np.mean(metrics)
+
+def compute_features(model, problem, mode='val'):
+    assert mode in ['test', 'val']
+    embs = []
+    for mids, _ in tqdm(problem.iterate_nodes(mode=mode, shuffle=False)):
+        embs.append(to_numpy(model(mids, problem.feats, train=False)))
+    
+    return np.vstack(embs)
+
 
 # --
 # Args
@@ -83,7 +96,7 @@ if __name__ == "__main__":
     # --
     # Load problem
     
-    problem = NodeProblem(problem_path=args.problem_path, cuda=args.cuda)
+    problem = EdgeProblem(problem_path=args.problem_path, cuda=args.cuda)
     
     # --
     # Define model
@@ -91,7 +104,7 @@ if __name__ == "__main__":
     n_train_samples = map(int, args.n_train_samples.split(','))
     n_val_samples = map(int, args.n_val_samples.split(','))
     output_dims = map(int, args.output_dims.split(','))
-    model = GSSupervised(**{
+    model = GSUnsupervised(**{
         "sampler_class" : sampler_lookup[args.sampler_class],
         "adj" : problem.adj,
         "train_adj" : problem.train_adj,
@@ -99,9 +112,12 @@ if __name__ == "__main__":
         "prep_class" : prep_lookup[args.prep_class],
         "aggregator_class" : aggregator_lookup[args.aggregator_class],
         
+        # >>
+        "n_classes" : problem.final_dim,
+        # <<
+        
         "input_dim" : problem.feats_dim,
         "n_nodes"   : problem.n_nodes,
-        "n_classes" : problem.n_classes,
         "layer_specs" : [
             {
                 "n_train_samples" : n_train_samples[0],
@@ -138,40 +154,32 @@ if __name__ == "__main__":
         
         # Train
         _ = model.train()
-        for ids, targets, epoch_progress in problem.iterate(mode='train', shuffle=True, batch_size=args.batch_size):
+        counter = 0
+        for anc_ids, pos_ids, neg_ids, epoch_progress in problem.iterate_edges(mode='train', shuffle=True, batch_size=args.batch_size):
+            
             model.set_progress((epoch + epoch_progress) / args.epochs)
-            preds = model.train_step(
-                ids=ids, 
+            embs = model.train_step(
+                anc_ids=anc_ids,
+                pos_ids=pos_ids,
+                neg_ids=neg_ids,
                 feats=problem.feats,
-                targets=targets,
                 loss_fn=problem.loss_fn,
             )
             
-            train_metric = problem.metric_fn(targets, preds)
-            print(json.dumps({
+            train_metric = problem.metric_fn(*embs)
+            print({
                 "epoch" : epoch,
                 "epoch_progress" : epoch_progress,
                 "train_metric" : train_metric,
                 "val_metric" : val_metric,
                 "time" : time() - start_time,
-            }, double_precision=5))
+            })
             sys.stdout.flush()
-        
-        # Evaluate
-        _ = model.eval()
-        val_metric = evaluate(model, problem, mode='val')
-    
-    print('-- done --', file=sys.stderr)
-    print(json.dumps({
-        "epoch" : epoch,
-        "train_metric" : train_metric,
-        "val_metric" : val_metric,
-        "time" : time() - start_time,
-    }, double_precision=5))
-    sys.stdout.flush()
-    
-    if args.show_test:
-        print(json.dumps({
-            "test_f1" : evaluate(model, problem, mode='test')
-        }, double_precision=5))
-
+            
+            # Evaluate
+            counter += 1
+            if not counter % 1000:
+                _ = model.eval()
+                embs = compute_features(model, problem, mode='val')
+                np.save('./embs', embs)
+                val_metric = evaluate(model, problem, mode='val')

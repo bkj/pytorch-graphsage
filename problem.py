@@ -20,6 +20,8 @@ import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
+from helpers import to_numpy
+
 # --
 # Helper classes
 
@@ -40,6 +42,8 @@ class ProblemLosses:
 class ProblemMetrics:
     @staticmethod
     def multilabel_classification(y_true, y_pred):
+        y_true, y_pred = to_numpy(y_true), to_numpy(y_pred)
+        
         y_pred = (y_pred > 0).astype(int)
         return {
             "micro" : float(metrics.f1_score(y_true, y_pred, average="micro")),
@@ -48,15 +52,18 @@ class ProblemMetrics:
     
     @staticmethod
     def classification(y_true, y_pred):
+        y_true, y_pred = to_numpy(y_true), to_numpy(y_pred)
+        
         y_pred = np.argmax(y_pred, axis=1)
         return {
             "micro" : float(metrics.f1_score(y_true, y_pred, average="micro")),
             "macro" : float(metrics.f1_score(y_true, y_pred, average="macro")),
         }
-        # return (y_pred == y_true.squeeze()).mean()
     
     @staticmethod
     def regression_mae(y_true, y_pred):
+        y_true, y_pred = to_numpy(y_true), to_numpy(y_pred)
+        
         return float(np.abs(y_true - y_pred).mean())
 
 
@@ -122,10 +129,13 @@ class NodeProblem(object):
         
         if self.task == 'multilabel_classification':
             targets = Variable(torch.FloatTensor(targets))
+            assert(len(targets.size()) == 2), 'multilabel_classification targets must be 2d'
         elif self.task == 'classification':
             targets = Variable(torch.LongTensor(targets))
+            assert(len(targets.size()) == 1), 'classification targets must be 1d'
         elif 'regression' in self.task:
             targets = Variable(torch.FloatTensor(targets))
+            assert(len(targets.size()) == 1), 'regression targets must be 1d'
         else:
             raise Exception('NodeDataLoader: unknown task: %s' % self.task)
         
@@ -164,15 +174,24 @@ class UnsupervisedLosses:
         pos_sim = (anc_emb * pos_emb).sum(dim=1)
         neg_sim = torch.mm(anc_emb, neg_emb.t())
         
-        pos_loss = bce_with_logits(logits=pos_sim, target=1).sum()
-        neg_loss = bce_with_logits(logits=neg_sim, target=0).sum()
+        pos_loss = bce_with_logits(logits=pos_sim, target=1).mean()
+        neg_loss = bce_with_logits(logits=neg_sim, target=0).mean()
+        
         return pos_loss + neg_alpha * neg_loss
 
 
 class UnsupervisedMetrics:
     @staticmethod
     def xent(anc_emb, pos_emb, neg_emb, neg_alpha=0.01):
-        return 0
+        
+        pos_sim = (anc_emb * pos_emb).sum(dim=1)
+        neg_sim = torch.mm(anc_emb, neg_emb.t())
+        
+        pos_loss = bce_with_logits(logits=pos_sim, target=1).mean()
+        neg_loss = bce_with_logits(logits=neg_sim, target=0).mean()
+        
+        loss = pos_loss + neg_alpha * neg_loss
+        return float(to_numpy(loss)[0])
 
 
 class EdgeProblem(object):
@@ -182,13 +201,17 @@ class EdgeProblem(object):
         
         f = h5py.File(problem_path)
         self.task      = f['task'].value
-        self.n_classes = f['n_classes'].value if 'n_classes' in f else 1 # !!
+        # self.n_classes = f['n_classes'].value if 'n_classes' in f else 1 # !!
+        self.final_dim = 128
         self.feats     = f['feats'].value if 'feats' in f else None
         self.folds     = f['folds'].value
-        # >>
         # self.targets   = f['targets'].value
+        
+        # >>
         self.context_pairs = f['context_pairs'].value
+        self.context_pairs_folds = f['context_pairs_folds'].value
         # <<
+        
         if 'sparse' in f and f['sparse'].value:
             self.adj = parse_csr_matrix(f['adj'].value)
             self.train_adj = parse_csr_matrix(f['train_adj'].value)
@@ -203,14 +226,22 @@ class EdgeProblem(object):
         self.cuda      = cuda
         self.__to_torch()
         
-        self.edges = {
+        self.nodes = {
             "train" : np.where(self.folds == 'train')[0],
             "val"   : np.where(self.folds == 'val')[0],
             "test"  : np.where(self.folds == 'test')[0],
         }
         
-        self.loss_fn = getattr(UnsupervisedLosses, self.task)
-        self.metric_fn = getattr(UnsupervisedMetrics, self.task)
+        # >>
+        self.folds = {
+            "train" : np.where(self.context_pairs_folds == 'train')[0],
+            "val"   : np.where(self.context_pairs_folds == 'val')[0],
+            "test"  : np.where(self.context_pairs_folds == 'test')[0],
+        }
+        # <<
+        
+        self.loss_fn = getattr(UnsupervisedLosses, 'xent')
+        self.metric_fn = getattr(UnsupervisedMetrics, 'xent')
         
         print('EdgeProblem: loading finished')
     
@@ -227,45 +258,52 @@ class EdgeProblem(object):
             if self.cuda:
                 self.feats = self.feats.cuda()
     
-    def __batch_to_torch(self, anc_ids, pos_ids, neg_ids):
+    def __batch_to_torch(self, mids):
         """ convert batch to torch """
-        anc_ids = Variable(torch.LongTensor(anc_ids))
-        pos_ids = Variable(torch.LongTensor(pos_ids))
-        neg_ids = Variable(torch.LongTensor(neg_ids))
+        mids = Variable(torch.LongTensor(mids))
         
         if self.cuda:
-            anc_ids, pos_ids, neg_ids = anc_ids.cuda(), pos_ids.cuda(), neg_ids.cuda()
+            mids = mids.cuda()
         
-        return anc_ids, pos_ids, neg_ids
+        return mids
     
-    def _sample_neg_ids(self, anc_ids, pos_ids, n=None):
-        # ... need to sample negative _nodes_ ...
-        # figure out fixed_unigram_candidate_sampler
-        # self.neg_samples, _, _ = tf.nn.fixed_unigram_candidate_sampler(
-        #     true_classes=labels,
-        #     num_true=1,
-        #     num_sampled=FLAGS.neg_sample_size,
-        #     unique=False,
-        #     range_max=len(self.degrees),
-        #     distortion=0.75,
-        #     unigrams=self.degrees.tolist()
-        # )
-        raise NotImplemented
+    def _negative_sampling(self, anc_ids, n=None):
+        """
+            simplest 'negative sampling':
+                just randomly pick nodes, weighted by number of times they appear in random walks
+            
+            (original version samples according to degree ** 0.75 -- IDK what that does)
+        """
+        idx = np.random.choice(self.context_pairs.shape[0], n if n else anc_ids.shape[0], replace=True)
+        return self.context_pairs[idx,0]
     
-    def iterate(self, mode, batch_size=512, shuffle=False):
-        edges = self.edges[mode]
+    def iterate_edges(self, mode, batch_size=512, neg_batch_size=20, shuffle=False):
+        context_pairs = self.context_pairs[self.folds[mode]]
         
-        idx = np.arange(edges.shape[0])
+        idx = np.arange(context_pairs.shape[0])
         if shuffle:
             idx = np.random.permutation(idx)
         
         n_chunks = idx.shape[0] // batch_size + 1
         for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
-            anc_ids, pos_ids = edges[chunk]
-            neg_ids = self._sample_neg_ids(anc_ids, pos_ids)
+            cpairs = context_pairs[chunk]
+            anc_ids, pos_ids = cpairs[:,0], cpairs[:,1]
+            neg_ids = self._negative_sampling(anc_ids, n=neg_batch_size)
             
-            anc_ids, pos_ids, neg_ids = self.__batch_to_torch(anc_ids, pos_ids, neg_ids)
+            anc_ids = self.__batch_to_torch(anc_ids)
+            pos_ids = self.__batch_to_torch(pos_ids)
+            neg_ids = self.__batch_to_torch(neg_ids)
             yield anc_ids, pos_ids, neg_ids, chunk_id / n_chunks
-
-
-
+    
+    def iterate_nodes(self, mode, batch_size=512, shuffle=False):
+        nodes = self.nodes[mode]
+        
+        idx = np.arange(nodes.shape[0])
+        if shuffle:
+            idx = np.random.permutation(idx)
+        
+        n_chunks = idx.shape[0] // batch_size + 1
+        for chunk_id, chunk in enumerate(np.array_split(idx, n_chunks)):
+            mids = nodes[chunk]
+            mids = self.__batch_to_torch(mids)
+            yield mids, chunk_id / n_chunks
