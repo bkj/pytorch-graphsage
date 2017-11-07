@@ -55,7 +55,9 @@ def validate_problem(problem):
 
 def save_problem(problem, outpath):
     assert validate_problem(problem)
-    assert not os.path.exists(outpath), 'save_problem: %s already exists' % outpath
+    if os.path.exists(outpath):
+        print('backing up old problem.h5', file=sys.stderr)
+        _ = shutil.move(outpath, outpath + '.bak')
     
     f = h5py.File(outpath)
     for k,v in problem.items():
@@ -71,7 +73,7 @@ def make_adjacency(G, max_degree, sel=None):
     
     # Initialize w/ links to a dummy node
     n_nodes = len(all_nodes)
-    adj = (np.zeros((n_nodes + 1, max_degree)) + n_nodes).astype(int)
+    adj = np.zeros((n_nodes + 1, max_degree), dtype=int) + n_nodes
     
     if sel is not None:
         # only look at nodes in training set
@@ -143,127 +145,127 @@ def parse_args():
     return args
 
 
-# if __name__ == "__main__":
-args = parse_args()
+if __name__ == "__main__":
+    args = parse_args()
 
-if os.path.exists(args.outpath):
-    print('backing up old problem.h5', file=sys.stderr)
-    _ = shutil.move(args.outpath, args.outpath + '.bak')
+    if os.path.exists(args.outpath):
+        print('backing up old problem.h5', file=sys.stderr)
+        _ = shutil.move(args.outpath, args.outpath + '.bak')
 
-print('loading <- %s' % args.inpath, file=sys.stderr)
-id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
-id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
-feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
-G         = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
+    print('loading <- %s' % args.inpath, file=sys.stderr)
+    id2target = json.load(open(os.path.join(args.inpath, 'class_map.json')))
+    id2idx    = json.load(open(os.path.join(args.inpath, 'id_map.json')))
+    feats     = np.load(os.path.join(args.inpath, 'feats.npy'))
+    G         = json_graph.node_link_graph(json.load(open(os.path.join(args.inpath, 'G.json'))))
 
-walks = None
-if os.path.exists(os.path.join(args.inpath, 'walks.txt')):
-    walks = pd.read_csv(os.path.join(args.inpath, 'walks.txt'), header=None, sep='\t')
-    walks = np.array(walks)
+    walks = None
+    if os.path.exists(os.path.join(args.inpath, 'walks.txt')):
+        walks = pd.read_csv(os.path.join(args.inpath, 'walks.txt'), header=None, sep='\t')
+        walks = np.array(walks)
 
-print('reordering')
-feats   = np.vstack([feats[id2idx[str(id)]] for id in G.nodes()])
-targets = np.vstack([id2target[str(id)] for id in G.nodes()])
-folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
+    print('reordering')
+    feats   = np.vstack([feats[id2idx[str(id)]] for id in G.nodes()])
+    targets = np.vstack([id2target[str(id)] for id in G.nodes()])
+    folds   = np.array([parse_fold(G.node[id]) for id in G.nodes()])
 
-old2new = dict(zip(G.nodes(), range(len(G.nodes()))))
-if walks is not None:
-    walks = np.vstack([(
-        old2new.get(w[0], -1),
-        old2new.get(w[1], -1),
-    ) for w in walks])
+    old2new = dict(zip(G.nodes(), range(len(G.nodes()))))
+    if walks is not None:
+        walks = np.vstack([(
+            old2new.get(w[0], -1),
+            old2new.get(w[1], -1),
+        ) for w in walks])
 
-walks = walks[~(walks == -1).any(axis=1)]
+    walks = walks[~(walks == -1).any(axis=1)]
 
-G = nx.convert_node_labels_to_integers(G)
+    G = nx.convert_node_labels_to_integers(G)
 
-print('normalizing feats', file=sys.stderr)
-scaler = StandardScaler().fit(feats[folds == 'train'])
-feats = scaler.transform(feats)
+    print('normalizing feats', file=sys.stderr)
+    scaler = StandardScaler().fit(feats[folds == 'train'])
+    feats = scaler.transform(feats)
 
-print('n_classes', file=sys.stderr)
-if args.task == 'classification':
-    n_classes = len(np.unique(targets))
-elif args.task == 'multilabel_classification':
-    n_classes = targets.shape[1]
-elif 'regression' in args.task:
-    n_classes = None
+    print('n_classes', file=sys.stderr)
+    if args.task == 'classification':
+        n_classes = len(np.unique(targets))
+    elif args.task == 'multilabel_classification':
+        n_classes = targets.shape[1]
+    elif 'regression' in args.task:
+        n_classes = None
 
-print('making adjacency lists', file=sys.stderr)
-adj = make_adjacency(G, args.max_degree, sel=None) # Adds dummy node
-train_adj = make_adjacency(G, args.max_degree, sel=(folds == 'train')) # Adds dummy node
+    print('making adjacency lists', file=sys.stderr)
+    adj = make_adjacency(G, args.max_degree, sel=None) # Adds dummy node
+    train_adj = make_adjacency(G, args.max_degree, sel=(folds == 'train')) # Adds dummy node
 
-aug_feats   = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
-aug_targets = np.vstack([targets, np.zeros((targets.shape[1],), dtype='int64')])
-aug_folds   = np.hstack([folds, ['dummy']])
+    aug_feats   = np.vstack([feats, np.zeros((feats.shape[1],))]) # Add feat for dummy node
+    aug_targets = np.vstack([targets, np.zeros((targets.shape[1],), dtype='int64')])
+    aug_folds   = np.hstack([folds, ['dummy']])
 
-# >>
+    # >>
 
-# !! What about edges w/ one node in?
-# train_ids = set(np.where(folds == 'train')[0])
-# tmp = [{
-#     "e0" : e[0] in train_ids,
-#     "e1" : e[1] in train_ids,
-#     "train_removed" : G[e[0]][e[1]].get('train_removed'),
-# } for e in G.edges()]
+    # !! What about edges w/ one node in?
+    # train_ids = set(np.where(folds == 'train')[0])
+    # tmp = [{
+    #     "e0" : e[0] in train_ids,
+    #     "e1" : e[1] in train_ids,
+    #     "train_removed" : G[e[0]][e[1]].get('train_removed'),
+    # } for e in G.edges()]
 
-# tmp = pd.DataFrame(tmp)
+    # tmp = pd.DataFrame(tmp)
 
-# tmp.drop_duplicates()
-# # e0     e1  train_removed
-# # 0        True   True          False
-# # 153024  False  False           True
+    # tmp.drop_duplicates()
+    # # e0     e1  train_removed
+    # # 0        True   True          False
+    # # 153024  False  False           True
 
-non_train_nodes = set(np.where(folds != 'train')[0])
-val_edges = np.vstack([e for e in G.edges() if e[0] in non_train_nodes or e[1] in non_train_nodes]) # !! Needs to be generalize.  What are we doing exactly?
-context_pairs = np.vstack([walks, val_edges])
-context_pairs_folds = np.concatenate([
-    np.repeat('train', walks.shape[0]),
-    np.repeat('val', val_edges.shape[0]),
-])
+    non_train_nodes = set(np.where(folds != 'train')[0])
+    val_edges = np.vstack([e for e in G.edges() if e[0] in non_train_nodes or e[1] in non_train_nodes]) # !! Needs to be generalize.  What are we doing exactly?
+    context_pairs = np.vstack([walks, val_edges])
+    context_pairs_folds = np.concatenate([
+        np.repeat('train', walks.shape[0]),
+        np.repeat('val', val_edges.shape[0]),
+    ])
 
-perm = np.random.permutation(context_pairs.shape[0])
-context_pairs = context_pairs[perm]
-context_pairs_folds = context_pairs_folds[perm]
+    perm = np.random.permutation(context_pairs.shape[0])
+    context_pairs = context_pairs[perm]
+    context_pairs_folds = context_pairs_folds[perm]
 
-# <<
+    # <<
 
-print('saving -> %s' % args.outpath, file=sys.stderr)
-save_problem({
-    "task"      : args.task,
-    "n_classes" : n_classes,
-    
-    "adj"       : adj,
-    "train_adj" : train_adj,
-    
-    "feats"     : aug_feats,
-    "targets"   : aug_targets,
-    "folds"     : aug_folds,
-    
-    "context_pairs" : context_pairs,
-    "context_pairs_folds" : context_pairs_folds
-}, args.outpath)
+    print('saving -> %s' % args.outpath, file=sys.stderr)
+    save_problem({
+        "task"      : args.task,
+        "n_classes" : n_classes,
+        
+        "adj"       : adj,
+        "train_adj" : train_adj,
+        
+        "feats"     : aug_feats,
+        "targets"   : aug_targets,
+        "folds"     : aug_folds,
+        
+        "context_pairs" : context_pairs,
+        "context_pairs_folds" : context_pairs_folds
+    }, args.outpath)
 
-# # >>
-# print('making sparse adjacency lists', file=sys.stderr)
-# adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
-# train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
+    # # >>
+    # print('making sparse adjacency lists', file=sys.stderr)
+    # adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
+    # train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
 
-# aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
-# aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
-# aug_folds   = np.hstack([['dummy'], folds])
+    # aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
+    # aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
+    # aug_folds   = np.hstack([['dummy'], folds])
 
-# print('saving -> %s' % args.outpath, file=sys.stderr)
-# save_problem({
-#     "task"      : args.task,
-#     "n_classes" : n_classes,
+    # print('saving -> %s' % args.outpath, file=sys.stderr)
+    # save_problem({
+    #     "task"      : args.task,
+    #     "n_classes" : n_classes,
 
-#     "sparse"    : True,
-#     "adj"       : spadj2edgelist(adj),
-#     "train_adj" : spadj2edgelist(train_adj),
+    #     "sparse"    : True,
+    #     "adj"       : spadj2edgelist(adj),
+    #     "train_adj" : spadj2edgelist(train_adj),
 
-#     "feats"     : aug_feats,
-#     "targets"   : aug_targets,
-#     "folds"     : aug_folds,
-# }, './data/reddit/sparse-problem.h5')
-# # <<
+    #     "feats"     : aug_feats,
+    #     "targets"   : aug_targets,
+    #     "folds"     : aug_folds,
+    # }, './data/reddit/sparse-problem.h5')
+    # # <<

@@ -55,3 +55,13 @@ python ./utrain.py \
     --problem-path ./data/example_data/problem.h5 \
     --lr-init 0.00001
 
+# --
+
+
+time ./train.py \
+    --problem-path ./data/enron/problem.h5 \
+    --aggregator-class mean \
+    --prep-class node_embedding \
+    --epochs 3
+
+

@@ -52,12 +52,19 @@ class ProblemMetrics:
     
     @staticmethod
     def classification(y_true, y_pred):
-        y_true, y_pred = to_numpy(y_true), to_numpy(y_pred)
+        y_true, y_pred = to_numpy(y_true).squeeze(), to_numpy(y_pred).squeeze()
         
-        y_pred = np.argmax(y_pred, axis=1)
+        pred_class = np.argmax(y_pred, axis=1)
+        
+        try:
+            roc = float(metrics.roc_auc_score(y_true, y_pred[:,1]))
+        except:
+            roc = None
+        
         return {
-            "micro" : float(metrics.f1_score(y_true, y_pred, average="micro")),
-            "macro" : float(metrics.f1_score(y_true, y_pred, average="macro")),
+            "micro" : float(metrics.f1_score(y_true, pred_class, average="micro")),
+            "macro" : float(metrics.f1_score(y_true, pred_class, average="macro")),
+            "roc"   : roc,
         }
     
     @staticmethod
@@ -77,7 +84,7 @@ def parse_csr_matrix(x):
 class NodeProblem(object):
     def __init__(self, problem_path, cuda=True):
         
-        print('NodeProblem: loading started')
+        print('NodeProblem: loading started', file=sys.stderr)
         
         f = h5py.File(problem_path)
         self.task      = f['task'].value
@@ -108,7 +115,7 @@ class NodeProblem(object):
         self.loss_fn = getattr(ProblemLosses, self.task)
         self.metric_fn = getattr(ProblemMetrics, self.task)
         
-        print('NodeProblem: loading finished')
+        print('NodeProblem: loading finished', file=sys.stderr)
     
     def __to_torch(self):
         if not sparse.issparse(self.adj):
@@ -132,7 +139,7 @@ class NodeProblem(object):
             assert(len(targets.size()) == 2), 'multilabel_classification targets must be 2d'
         elif self.task == 'classification':
             targets = Variable(torch.LongTensor(targets))
-            assert(len(targets.size()) == 1), 'classification targets must be 1d'
+            assert(targets.size(1) == 1), 'classification targets must be 1d'
         elif 'regression' in self.task:
             targets = Variable(torch.FloatTensor(targets))
             assert(len(targets.size()) == 1), 'regression targets must be 1d'
@@ -174,10 +181,11 @@ class UnsupervisedLosses:
         pos_sim = (anc_emb * pos_emb).sum(dim=1)
         neg_sim = torch.mm(anc_emb, neg_emb.t())
         
-        pos_loss = bce_with_logits(logits=pos_sim, target=1).mean()
-        neg_loss = bce_with_logits(logits=neg_sim, target=0).mean()
+        pos_loss = bce_with_logits(logits=pos_sim, target=1).sum()
+        neg_loss = bce_with_logits(logits=neg_sim, target=0).sum()
         
-        return pos_loss + neg_alpha * neg_loss
+        loss = pos_loss + neg_alpha * neg_loss
+        return loss / anc_emb.size(0)
 
 
 class UnsupervisedMetrics:
@@ -187,10 +195,11 @@ class UnsupervisedMetrics:
         pos_sim = (anc_emb * pos_emb).sum(dim=1)
         neg_sim = torch.mm(anc_emb, neg_emb.t())
         
-        pos_loss = bce_with_logits(logits=pos_sim, target=1).mean()
-        neg_loss = bce_with_logits(logits=neg_sim, target=0).mean()
+        pos_loss = bce_with_logits(logits=pos_sim, target=1).sum()
+        neg_loss = bce_with_logits(logits=neg_sim, target=0).sum()
         
         loss = pos_loss + neg_alpha * neg_loss
+        loss = loss / anc_emb.size(0)
         return float(to_numpy(loss)[0])
 
 

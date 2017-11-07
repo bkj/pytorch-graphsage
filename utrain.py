@@ -32,9 +32,9 @@ def evaluate(model, problem, mode='val'):
     metrics = []
     for (anc_ids, pos_ids, neg_ids, _) in tqdm(problem.iterate_edges(mode=mode, shuffle=False)):
         metrics.append(problem.metric_fn(
-            model(anc_ids, problem.feats, train=False),
-            model(pos_ids, problem.feats, train=False),
-            model(neg_ids, problem.feats, train=False),
+            model(anc_ids, problem.feats, train=False, normalize_out=True),
+            model(pos_ids, problem.feats, train=False, normalize_out=True),
+            model(neg_ids, problem.feats, train=False, normalize_out=True),
         ))
     
     return np.mean(metrics)
@@ -43,7 +43,7 @@ def compute_features(model, problem, mode='val'):
     assert mode in ['test', 'val']
     embs = []
     for mids, _ in tqdm(problem.iterate_nodes(mode=mode, shuffle=False)):
-        embs.append(to_numpy(model(mids, problem.feats, train=False)))
+        embs.append(to_numpy(model(mids, problem.feats, train=False, normalize_out=True)))
     
     return np.vstack(embs)
 

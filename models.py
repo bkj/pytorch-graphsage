@@ -77,7 +77,7 @@ class GSModel(nn.Module):
         self.lr = self.lr_scheduler(progress)
         LRSchedule.set_lr(self.optimizer, self.lr)
     
-    def forward(self, ids, feats, train):
+    def forward(self, ids, feats, train, normalize_out=False):
         # Sample neighbors
         sample_fns = self.train_sample_fns if train else self.val_sample_fns
         
@@ -97,7 +97,11 @@ class GSModel(nn.Module):
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
         out = F.normalize(all_feats[0], dim=1) # ?? Do we actually want this? ... Sometimes ...
-        return self.fc(out)
+        out = self.fc(out)
+        if normalize_out:
+            out = F.normalize(out, dim=1)
+        
+        return out
 
 # --
 # Supervised model
@@ -122,9 +126,9 @@ class GSUnsupervised(GSModel):
     def train_step(self, anc_ids, pos_ids, neg_ids, feats, loss_fn):
         self.optimizer.zero_grad()
         
-        anc_emb = self(anc_ids, feats, train=True)
-        pos_emb = self(pos_ids, feats, train=True)
-        neg_emb = self(neg_ids, feats, train=True)
+        anc_emb = self(anc_ids, feats, train=True, normalize_out=True)
+        pos_emb = self(pos_ids, feats, train=True, normalize_out=True)
+        neg_emb = self(neg_ids, feats, train=True, normalize_out=True)
         loss = loss_fn(anc_emb, pos_emb, neg_emb)
         
         loss.backward()

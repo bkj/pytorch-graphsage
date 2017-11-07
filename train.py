@@ -23,17 +23,38 @@ from helpers import set_seeds, to_numpy
 from nn_modules import aggregator_lookup, prep_lookup, sampler_lookup
 from lr import LRSchedule
 
+import pandas as pd
+
 # --
 # Helpers
 
 def evaluate(model, problem, mode='val'):
     assert mode in ['test', 'val']
-    preds, acts = [], []
+    preds, acts, mids = [], [], []
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
         preds.append(to_numpy(model(ids, problem.feats, train=False)))
         acts.append(to_numpy(targets))
+        mids.append(to_numpy(ids))
     
-    return problem.metric_fn(np.vstack(acts), np.vstack(preds))
+    acts = np.vstack(acts)
+    preds = np.vstack(preds)
+    mids = np.hstack(mids)
+    
+    # >>
+    
+    print(pd.crosstab(acts.squeeze(), preds.squeeze().argmax(axis=1).round() + 1000))
+    
+    sel = acts.squeeze() == 0
+    mids_ = mids[sel]
+    preds_ = preds[sel]
+    
+    z = preds_[:,1].argsort()[-10:]
+    print(mids_[z])
+    print(preds_[z,1])
+    
+    # <<
+    
+    return problem.metric_fn(acts, preds)
 
 # --
 # Args
