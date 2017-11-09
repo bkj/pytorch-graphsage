@@ -292,6 +292,19 @@ class MeanAggregator(nn.Module, AggregatorMixin):
         
         return out
 
+class SimpleMeanAggregator(nn.Module):
+    def __init__(self, input_dim, output_dim, activation, combine_fn=lambda x: torch.cat(x, dim=1)):
+        super(SimpleMeanAggregator, self).__init__()
+        self.output_dim = output_dim
+        self.fc_x = nn.Linear(3, 3, bias=True)
+        
+    def forward(self, x, neibs):
+        agg_neib = neibs.view(x.size(0), -1, neibs.size(1)) # !! Careful
+        agg_neib = agg_neib.mean(dim=1) # Careful
+        
+        out = self.fc_x(agg_neib[:,:3])
+        
+        return out
 
 class PoolAggregator(nn.Module, AggregatorMixin):
     def __init__(self, input_dim, output_dim, pool_fn, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
@@ -412,6 +425,7 @@ class AttentionAggregator(nn.Module, AggregatorMixin):
 
 aggregator_lookup = {
     "mean" : MeanAggregator,
+    "simple_mean" : SimpleMeanAggregator,
     "max_pool" : MaxPoolAggregator,
     "mean_pool" : MeanPoolAggregator,
     "lstm" : LSTMAggregator,

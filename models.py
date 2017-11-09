@@ -107,14 +107,16 @@ class GSModel(nn.Module):
 # Supervised model
 
 class GSSupervised(GSModel):
-    def train_step(self, ids, feats, targets, loss_fn):
+    def train_step(self, ids, feats, targets, loss_fn, clip_grad=True):
         self.optimizer.zero_grad()
         
         preds = self(ids, feats, train=True)
         loss = loss_fn(preds, targets.squeeze())
         
         loss.backward()
-        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        if clip_grad:
+            torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        
         self.optimizer.step()
         
         return preds
@@ -123,7 +125,7 @@ class GSSupervised(GSModel):
 # Unsupervised model
 
 class GSUnsupervised(GSModel):
-    def train_step(self, anc_ids, pos_ids, neg_ids, feats, loss_fn):
+    def train_step(self, anc_ids, pos_ids, neg_ids, feats, loss_fn, clip_grad=True):
         self.optimizer.zero_grad()
         
         anc_emb = self(anc_ids, feats, train=True, normalize_out=True)
@@ -132,7 +134,10 @@ class GSUnsupervised(GSModel):
         loss = loss_fn(anc_emb, pos_emb, neg_emb)
         
         loss.backward()
-        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        
+        if clip_grad:
+            torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        
         self.optimizer.step()
         
         return anc_emb, pos_emb, neg_emb

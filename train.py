@@ -63,9 +63,9 @@ def parse_args():
     parser.add_argument('--aggregator-class', type=str, default='mean')
     parser.add_argument('--prep-class', type=str, default='identity')
     
-    parser.add_argument('--n-train-samples', type=str, default='25,10')
-    parser.add_argument('--n-val-samples', type=str, default='25,10')
-    parser.add_argument('--output-dims', type=str, default='128,128')
+    parser.add_argument('--n-train-samples', type=str, default='25')
+    parser.add_argument('--n-val-samples', type=str, default='25')
+    parser.add_argument('--output-dims', type=str, default='3')
     
     # Logging
     parser.add_argument('--log-interval', default=10, type=int)
@@ -114,14 +114,15 @@ if __name__ == "__main__":
                 "n_train_samples" : n_train_samples[0],
                 "n_val_samples" : n_val_samples[0],
                 "output_dim" : output_dims[0],
-                "activation" : F.relu,
-            },
-            {
-                "n_train_samples" : n_train_samples[1],
-                "n_val_samples" : n_val_samples[1],
-                "output_dim" : output_dims[1],
+                # "activation" : F.relu,
                 "activation" : lambda x: x,
             },
+            # {
+            #     "n_train_samples" : n_train_samples[1],
+            #     "n_val_samples" : n_val_samples[1],
+            #     "output_dim" : output_dims[1],
+            #     "activation" : lambda x: x,
+            # },
         ],
         
         "lr_init" : args.lr_init,
