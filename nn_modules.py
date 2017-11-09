@@ -145,7 +145,8 @@ class NodeEmbeddingPrep(nn.Module):
         if layer_idx > 0:
             embs = self.embedding(ids)
         else:
-            # Don't look at node's own embedding for prediction, or you'll probably overfit a lot
+            # Don't look at node's own embedding for training, or you'll probably overfit a lot
+            # !! You may want to look at the embedding at test time though...
             embs = self.embedding(Variable(ids.clone().data.zero_() + self.n_nodes))
         
         embs = self.fc(embs)
@@ -157,7 +158,6 @@ class NodeEmbeddingPrep(nn.Module):
 
 class LinearPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, output_dim=32):
-        """ adds node embedding """
         super(LinearPrep, self).__init__()
         self.fc = nn.Linear(input_dim, output_dim, bias=False)
         self.output_dim = output_dim
@@ -166,13 +166,64 @@ class LinearPrep(nn.Module):
         return self.fc(feats)
 
 
-class BagOfWordsPrep(nn.Module):
-    """
-        set of embeddings for categorical features in the input (or word features)
-        should support concatenation/averaging/LSTM/whatever
+class NonlinearPrep(nn.Module):
+    def __init__(self, input_dim, n_nodes, output_dim=32):
+        super(NonlinearPrep, self).__init__()
+        self.fc1 = nn.Linear(input_dim, output_dim)
+        self.fc2 = nn.Linear(output_dim, output_dim)
+        self.fc3 = nn.Linear(output_dim, output_dim)
         
-        Need to know the max number of classes
-    """
+        self.n_nodes = n_nodes
+        self.embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=output_dim)
+        self.fc = nn.Linear(output_dim * 2, output_dim)
+        
+        self.output_dim = output_dim
+    
+    def forward(self, ids, feats, layer_idx=0):
+        if layer_idx > 0:
+            embs = self.embedding(ids)
+        else:
+            # !! Don't use feats to predict own location
+            # ... But what if it bounces back to itself?  This is no good as is 
+            feats = feats - feats
+            embs = self.embedding(Variable(ids.clone().data.zero_() + self.n_nodes))
+        
+        feats = F.relu(self.fc1(feats))
+        feats = F.relu(self.fc2(feats))
+        feats = self.fc3(feats)
+        
+        out = torch.cat([feats, embs], dim=1)
+        out = self.fc(out)
+        return out
+
+
+# <<
+
+# class BagOfWordsPrep(nn.Module):
+#     """
+#         set of embeddings for categorical features in the input (or word features)
+#         should support concatenation/averaging/LSTM/whatever
+        
+#         Need to know the max number of classes
+#     """
+#     def __init__(self, input_dim, n_nodes, output_dim=32, embedding_dim=32):
+#         super(BagOfWordsPrep, self).__init__()
+        
+#         self.n_nodes = n_nodes
+#         self.embedding_dim = embedding_dim
+        
+#         self.feat_embedding = nn.Embedding(num_embeddings=15000, embedding_dim=embedding_dim)
+#         self.feat_fc = nn.Linear(embedding_dim, output_dim)
+        
+#         self.output_dim = output_dim
+    
+#     def forward(self, ids, feats, layer_idx=0):
+#         feat_embs = self.feat_embedding(feats.long()).mean(dim=1)
+#         feat_embs = self.feat_fc(feat_embs)
+#         return feat_embs
+
+
+class BagOfWordsPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, output_dim=32, embedding_dim=32):
         super(BagOfWordsPrep, self).__init__()
         
@@ -182,7 +233,7 @@ class BagOfWordsPrep(nn.Module):
         self.node_embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=embedding_dim)
         self.node_fc = nn.Linear(embedding_dim, output_dim) # Affine transform, for changing scale + location
         
-        self.feat_embedding = nn.Embedding(num_embeddings=10000, embedding_dim=embedding_dim)
+        self.feat_embedding = nn.Embedding(num_embeddings=15000, embedding_dim=embedding_dim)
         self.feat_fc = nn.Linear(embedding_dim, output_dim)
         
         self.output_dim = output_dim * 2
@@ -191,7 +242,6 @@ class BagOfWordsPrep(nn.Module):
         if layer_idx > 0:
             node_embs = self.node_embedding(ids)
         else:
-            # Don't look at node's own embedding for prediction, or you'll probably overfit a lot
             node_embs = self.node_embedding(Variable(ids.clone().data.zero_() + self.n_nodes))
         
         node_embs = self.node_fc(node_embs)
@@ -201,13 +251,13 @@ class BagOfWordsPrep(nn.Module):
         
         return torch.cat([feat_embs, node_embs], dim=1)
 
-
-
+# >>
 
 prep_lookup = {
     "identity" : IdentityPrep,
     "node_embedding" : NodeEmbeddingPrep,
     "linear" : LinearPrep,
+    "nonlinear" : NonlinearPrep,
     "bag_of_words" : BagOfWordsPrep,
 }
 

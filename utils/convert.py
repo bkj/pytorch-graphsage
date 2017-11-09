@@ -66,8 +66,12 @@ def save_problem(problem, outpath):
     
     f.close()
 
+def check_edgelist(x):
+    assert x.min() == 0, "x.min() != 0"
+    assert x.max() == (np.unique(x).shape[0] - 1), 'x.max() != (np.unique(x).shape - 1)'
+    return True
 
-def make_adjacency(G, max_degree, sel=None):
+def make_adjacency(G, max_degree, sel=None, use_tqdm=True):
     
     all_nodes = np.array(G.nodes())
     
@@ -79,7 +83,12 @@ def make_adjacency(G, max_degree, sel=None):
         # only look at nodes in training set
         all_nodes = all_nodes[sel]
     
-    for node in tqdm(all_nodes):
+    gen = tqdm(enumerate(all_nodes)) if use_tqdm else enumerate(all_nodes)
+    for i, node in gen:
+        if not use_tqdm:
+            if not i % 100000:
+                print('Progress: %d/%d' % (i, len(all_nodes)))
+        
         neibs = np.array(list(G.neighbors(node)))
         
         if sel is not None:

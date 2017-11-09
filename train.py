@@ -34,25 +34,11 @@ def evaluate(model, problem, mode='val'):
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
         preds.append(to_numpy(model(ids, problem.feats, train=False)))
         acts.append(to_numpy(targets))
-        mids.append(to_numpy(ids))
+        # mids.append(to_numpy(ids))
     
     acts = np.vstack(acts)
     preds = np.vstack(preds)
-    mids = np.hstack(mids)
-    
-    # >>
-    
-    print(pd.crosstab(acts.squeeze(), preds.squeeze().argmax(axis=1).round() + 1000))
-    
-    sel = acts.squeeze() == 0
-    mids_ = mids[sel]
-    preds_ = preds[sel]
-    
-    z = preds_[:,1].argsort()[-10:]
-    print(mids_[z])
-    print(preds_[z,1])
-    
-    # <<
+    # mids = np.hstack(mids)
     
     return problem.metric_fn(acts, preds)
 

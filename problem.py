@@ -57,14 +57,16 @@ class ProblemMetrics:
         pred_class = np.argmax(y_pred, axis=1)
         
         try:
-            roc = float(metrics.roc_auc_score(y_true, y_pred[:,1]))
+            auc = float(metrics.roc_auc_score(y_true, y_pred[:,1]))
         except:
-            roc = None
+            auc = None
         
         return {
-            "micro" : float(metrics.f1_score(y_true, pred_class, average="micro")),
-            "macro" : float(metrics.f1_score(y_true, pred_class, average="macro")),
-            "roc"   : roc,
+            "micro"     : float(metrics.f1_score(y_true, pred_class, average="micro")),
+            "macro"     : float(metrics.f1_score(y_true, pred_class, average="macro")),
+            "auc"       : auc,
+            "precision" : float(metrics.precision_score(y_true, pred_class)),
+            "recall"    : float(metrics.recall_score(y_true, pred_class)),
         }
     
     @staticmethod
@@ -139,7 +141,7 @@ class NodeProblem(object):
             assert(len(targets.size()) == 2), 'multilabel_classification targets must be 2d'
         elif self.task == 'classification':
             targets = Variable(torch.LongTensor(targets))
-            assert(targets.size(1) == 1), 'classification targets must be 1d'
+            assert(targets.size(1) == 1), 'classification targets must be Nx1'
         elif 'regression' in self.task:
             targets = Variable(torch.FloatTensor(targets))
             assert(len(targets.size()) == 1), 'regression targets must be 1d'
