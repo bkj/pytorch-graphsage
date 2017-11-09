@@ -92,7 +92,11 @@ class GSModel(nn.Module):
         # Sequentially apply layers, per original (little weird, IMO)
         # Each iteration reduces length of array by one
         for agg_layer in self.agg_layers.children():
-            all_feats = [agg_layer(all_feats[k], all_feats[k + 1]) for k in range(len(all_feats) - 1)]
+            all_feats = [
+                agg_layer(
+                    node_feats=all_feats[k],
+                    neib_feats=all_feats[k + 1],
+                ) for k in range(len(all_feats) - 1)]
         
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
