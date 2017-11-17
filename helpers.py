@@ -14,7 +14,8 @@ from torch.autograd import Variable
 def set_seeds(seed=0):
     np.random.seed(seed)
     _ = torch.manual_seed(seed)
-    _ = torch.cuda.manual_seed(seed)
+    if torch.cuda.is_available():
+        _ = torch.cuda.manual_seed(seed)
 
 
 def to_numpy(x):
