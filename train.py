@@ -30,16 +30,23 @@ import pandas as pd
 
 def evaluate(model, problem, mode='val'):
     assert mode in ['test', 'val']
-    preds, acts, mids = [], [], []
+    preds, acts, feats = [], [], []
     for (ids, targets, _) in problem.iterate(mode=mode, shuffle=False):
         preds.append(to_numpy(model(ids, problem.feats, train=False)))
         acts.append(to_numpy(targets))
-        # mids.append(to_numpy(ids))
+        if problem.feats is not None:
+            feats.append(to_numpy(problem.feats[ids]))
     
     acts = np.vstack(acts)
-    preds = np.vstack(preds)
-    # mids = np.hstack(mids)
+    np.save('acts', acts)
     
+    preds = np.vstack(preds)
+    np.save('preds', preds)
+    
+    if len(feats) > 0:
+        feats = np.vstack(feats)
+        np.save('feats', feats)
+
     return problem.metric_fn(acts, preds)
 
 # --
@@ -161,8 +168,8 @@ if __name__ == "__main__":
                 "epoch_progress" : epoch_progress,
                 "train_metric" : train_metric,
                 "val_metric" : val_metric,
-                "time" : time() - start_time,
-            }, double_precision=5))
+                "time" : (time() - start_time),
+            }, double_precision=4))
             sys.stdout.flush()
         
         # Evaluate
@@ -174,12 +181,12 @@ if __name__ == "__main__":
         "epoch" : epoch,
         "train_metric" : train_metric,
         "val_metric" : val_metric,
-        "time" : time() - start_time,
-    }, double_precision=5))
+        "time" : (time() - start_time),
+    }, double_precision=4))
     sys.stdout.flush()
     
     if args.show_test:
         print(json.dumps({
             "test_f1" : evaluate(model, problem, mode='test')
-        }, double_precision=5))
+        }))
 

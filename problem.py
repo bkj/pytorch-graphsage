@@ -62,8 +62,8 @@ class ProblemMetrics:
             auc = None
         
         return {
-            "micro"     : float(metrics.f1_score(y_true, pred_class, average="micro")),
-            "macro"     : float(metrics.f1_score(y_true, pred_class, average="macro")),
+            # "micro"     : float(metrics.f1_score(y_true, pred_class, average="micro")),
+            # "macro"     : float(metrics.f1_score(y_true, pred_class, average="macro")),
             "auc"       : auc,
             "precision" : float(metrics.precision_score(y_true, pred_class)),
             "recall"    : float(metrics.recall_score(y_true, pred_class)),

@@ -121,7 +121,7 @@ class IdentityPrep(nn.Module):
 
 
 class NodeEmbeddingPrep(nn.Module):
-    def __init__(self, input_dim, n_nodes, embedding_dim=32):
+    def __init__(self, input_dim, n_nodes, embedding_dim=8):
         """ adds node embedding """
         super(NodeEmbeddingPrep, self).__init__()
         
@@ -156,44 +156,25 @@ class NodeEmbeddingPrep(nn.Module):
 class LinearPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, output_dim=32):
         super(LinearPrep, self).__init__()
-        self.fc = nn.Linear(input_dim, output_dim, bias=False)
+        self.fc = nn.Linear(input_dim, output_dim)
         self.output_dim = output_dim
     
     def forward(self, ids, feats, layer_idx=0):
         return self.fc(feats)
 
 
-class NonlinearPrep(nn.Module):
+class NonLinearPrep(nn.Module):
     def __init__(self, input_dim, n_nodes, output_dim=32):
-        super(NonlinearPrep, self).__init__()
-        self.fc1 = nn.Linear(input_dim, output_dim)
-        self.fc2 = nn.Linear(output_dim, output_dim)
-        self.fc3 = nn.Linear(output_dim, output_dim)
-        
-        self.n_nodes = n_nodes
-        self.embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=output_dim)
-        self.fc = nn.Linear(output_dim, output_dim)
-        
+        super(NonLinearPrep, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.Tanh(),
+            nn.Linear(output_dim, output_dim),
+        )
         self.output_dim = output_dim
     
     def forward(self, ids, feats, layer_idx=0):
-        if layer_idx > 0:
-            # embs = self.embedding(ids)
-            pass
-        else:
-            # !! Don't use feats to predict own location
-            # ... But what if it bounces back to itself?  This is no good as is 
-            feats = feats - feats
-            # embs = self.embedding(Variable(ids.clone().data.zero_() + self.n_nodes))
-        
-        feats = F.relu(self.fc1(feats))
-        feats = F.relu(self.fc2(feats))
-        feats = self.fc3(feats)
-        
-        # out = torch.cat([feats, embs], dim=1)
-        out = self.fc(feats)
-        return out
-
+        return self.mlp(feats)
 
 # <<
 
@@ -249,14 +230,51 @@ class BagOfWordsPrep(nn.Module):
         
         return torch.cat([feat_embs, node_embs], dim=1)
 
+
+class GeoBagOfWordsPrep(nn.Module):
+    def __init__(self, input_dim, n_nodes, output_dim=16, embedding_dim=16):
+        super(GeoBagOfWordsPrep, self).__init__()
+        
+        self.n_nodes = n_nodes
+        self.embedding_dim = embedding_dim
+        
+        self.cat_feat_embedding = nn.Embedding(num_embeddings=400000, embedding_dim=embedding_dim)
+        self.cat_feat_fc = nn.Linear(embedding_dim, output_dim)
+        
+        self.n_cat = 28
+        self.con_feat_mlp = nn.Sequential(
+            nn.Linear(input_dim - self.n_cat, output_dim),
+            nn.Tanh(),
+            nn.Linear(output_dim, output_dim),
+        )
+        
+        self.fc = nn.Linear(output_dim * 2, output_dim)
+        
+        self.output_dim = output_dim
+    
+    def forward(self, ids, feats, layer_idx=0):
+        
+        con_feats = feats[:,:-self.n_cat]
+        con_feat_embs = self.con_feat_mlp(con_feats)
+        
+        cat_feats = feats[:,-self.n_cat:]
+        cat_feat_embs = self.cat_feat_embedding(cat_feats.long()).mean(dim=1)
+        cat_feat_embs = self.cat_feat_fc(cat_feat_embs)
+        
+        out = torch.cat([cat_feat_embs, con_feat_embs], dim=1)
+        
+        out = self.fc(out)
+        return out
+
 # >>
 
 prep_lookup = {
-    "identity" : IdentityPrep,
+    "identity"       : IdentityPrep,
     "node_embedding" : NodeEmbeddingPrep,
-    "linear" : LinearPrep,
-    "nonlinear" : NonlinearPrep,
-    "bag_of_words" : BagOfWordsPrep,
+    "linear"         : LinearPrep,
+    "nonlinear"      : NonLinearPrep,
+    "bag_of_words"   : BagOfWordsPrep,
+    "geo_bag_of_words"   : GeoBagOfWordsPrep,
 }
 
 # --
@@ -270,7 +288,10 @@ class AggregatorMixin(object):
 
 
 class MeanAggregator(nn.Module, AggregatorMixin):
-    def __init__(self, input_dim, output_dim, activation, combine_fn=lambda x: torch.cat(x, dim=1)):
+    """
+        average of neighbors + node features
+    """
+    def __init__(self, input_dim, output_dim, activation, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MeanAggregator, self).__init__()
         
         self.fc_node = nn.Linear(input_dim, output_dim, bias=False)
@@ -280,7 +301,7 @@ class MeanAggregator(nn.Module, AggregatorMixin):
         self.activation = activation
         self.combine_fn = combine_fn
     
-    def forward(self, node_feats, neib_feats):
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
         agg_neib = neib_feats.view(node_feats.size(0), -1, neib_feats.size(1)) # !! Careful
         agg_neib = agg_neib.mean(dim=1) # Careful
         
@@ -290,22 +311,53 @@ class MeanAggregator(nn.Module, AggregatorMixin):
         
         return out
 
+# >>
 class SimpleMeanAggregator(nn.Module):
-    def __init__(self, input_dim, output_dim, activation, combine_fn=lambda x: torch.cat(x, dim=1)):
+    """
+        takes average of neighbors + a one layer linear transform (to speed training)
+    """
+    def __init__(self, input_dim, output_dim, activation, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(SimpleMeanAggregator, self).__init__()
-        self.output_dim = output_dim
-        self.fc_neib = nn.Linear(3, 3, bias=True)
         
-    def forward(self, node_feats, neib_feats):
+        self.output_dim = output_dim
+        self.fc_neib = nn.Linear(input_dim, output_dim, bias=True)
+        
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
         agg_neib = neib_feats.view(node_feats.size(0), -1, neib_feats.size(1)) # !! Careful
         agg_neib = agg_neib.mean(dim=1) # Careful
         
-        out = self.fc_neib(agg_neib[:,:3])
+        out = self.fc_neib(agg_neib)
         
         return out
 
+
+class PSimpleMeanAggregator(nn.Module):
+    """
+        average of neighbors, w/ learned weights
+    """
+    def __init__(self, input_dim, output_dim, activation, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
+        super(PSimpleMeanAggregator, self).__init__()
+        
+        self.output_dim = output_dim
+        self.embedding = nn.Embedding(num_embeddings=n_nodes + 1, embedding_dim=1)
+        self.fc_neib = nn.Linear(input_dim, output_dim_, bias=True)
+        
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
+        
+        neib_weights = self.embedding(neib_ids)
+        neib_weights = neib_weights.view(node_feats.size(0), -1, 1)
+        neib_weights = F.softmax(neib_weights.transpose(0, 1)).transpose(0, 1)
+        
+        agg_neib = neib_feats.view(node_feats.size(0), -1, neib_feats.size(1)) # !! Careful
+        agg_neib = (agg_neib * neib_weights).sum(dim=1) # Careful
+        
+        out = self.fc_neib(agg_neib)
+        
+        return out
+# <<
+
 class PoolAggregator(nn.Module, AggregatorMixin):
-    def __init__(self, input_dim, output_dim, pool_fn, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
+    def __init__(self, input_dim, output_dim, pool_fn, activation, hidden_dim=512, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(PoolAggregator, self).__init__()
         
         self.mlp = nn.Sequential(*[
@@ -320,7 +372,7 @@ class PoolAggregator(nn.Module, AggregatorMixin):
         self.pool_fn = pool_fn
         self.combine_fn = combine_fn
     
-    def forward(self, node_feats, neib_feats):
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
         h_neib_feats = self.mlp(neib_feats)
         agg_neib = h_neib_feats.view(node_feats.size(0), -1, h_neib_feats.size(1))
         agg_neib = self.pool_fn(agg_neib)
@@ -333,7 +385,7 @@ class PoolAggregator(nn.Module, AggregatorMixin):
 
 
 class MaxPoolAggregator(PoolAggregator):
-    def __init__(self, input_dim, output_dim, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
+    def __init__(self, input_dim, output_dim, activation, hidden_dim=512, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MaxPoolAggregator, self).__init__(**{
             "input_dim"  : input_dim,
             "output_dim" : output_dim,
@@ -345,7 +397,7 @@ class MaxPoolAggregator(PoolAggregator):
 
 
 class MeanPoolAggregator(PoolAggregator):
-    def __init__(self, input_dim, output_dim, activation, hidden_dim=512, combine_fn=lambda x: torch.cat(x, dim=1)):
+    def __init__(self, input_dim, output_dim, activation, hidden_dim=512, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         super(MeanPoolAggregator, self).__init__(**{
             "input_dim"  : input_dim,
             "output_dim" : output_dim,
@@ -358,7 +410,7 @@ class MeanPoolAggregator(PoolAggregator):
 
 class LSTMAggregator(nn.Module, AggregatorMixin):
     def __init__(self, input_dim, output_dim, activation, 
-        hidden_dim=512, bidirectional=False, combine_fn=lambda x: torch.cat(x, dim=1)):
+        hidden_dim=512, bidirectional=False, n_nodes=None, combine_fn=lambda x: torch.cat(x, dim=1)):
         
         super(LSTMAggregator, self).__init__()
         assert not hidden_dim % 2, "LSTMAggregator: hiddem_dim % 2 != 0"
@@ -371,7 +423,7 @@ class LSTMAggregator(nn.Module, AggregatorMixin):
         self.activation = activation
         self.combine_fn = combine_fn
     
-    def forward(self, node_feats, neib_feats):
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
         node_feats_emb = self.fc_node(node_feats)
         
         agg_neib_feats = neib_feats.view(node_feats.size(0), -1, neib_feats.size(1))
@@ -387,7 +439,9 @@ class LSTMAggregator(nn.Module, AggregatorMixin):
 
 
 class AttentionAggregator(nn.Module, AggregatorMixin):
-    def __init__(self, input_dim, output_dim, activation, hidden_dim=32, combine_fn=lambda x: torch.cat(x, dim=1)):
+    def __init__(self, input_dim, output_dim, activation, hidden_dim=32, n_nodes=None,
+        combine_fn=lambda x: torch.cat(x, dim=1)):
+    
         super(AttentionAggregator, self).__init__()
         
         self.att = nn.Sequential(*[
@@ -402,7 +456,7 @@ class AttentionAggregator(nn.Module, AggregatorMixin):
         self.activation = activation
         self.combine_fn = combine_fn
     
-    def forward(self, node_feats, neib_feats):
+    def forward(self, node_feats, neib_feats, node_ids, neib_ids):
         # Compute attention weights
         neib_att = self.att(neib_feats)
         node_att = self.att(node_feats)
@@ -422,10 +476,11 @@ class AttentionAggregator(nn.Module, AggregatorMixin):
 
 
 aggregator_lookup = {
-    "mean"        : MeanAggregator,
-    "simple_mean" : SimpleMeanAggregator,
-    "max_pool"    : MaxPoolAggregator,
-    "mean_pool"   : MeanPoolAggregator,
-    "lstm"        : LSTMAggregator,
-    "attention"   : AttentionAggregator,
+    "mean"         : MeanAggregator,
+    "simple_mean"  : SimpleMeanAggregator,
+    "psimple_mean" : PSimpleMeanAggregator,
+    "max_pool"     : MaxPoolAggregator,
+    "mean_pool"    : MeanPoolAggregator,
+    "lstm"         : LSTMAggregator,
+    "attention"    : AttentionAggregator,
 }

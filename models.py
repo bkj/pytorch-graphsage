@@ -59,6 +59,7 @@ class GSModel(nn.Module):
                 input_dim=input_dim,
                 output_dim=spec['output_dim'],
                 activation=spec['activation'],
+                n_nodes=n_nodes
             )
             agg_layers.append(agg)
             input_dim = agg.output_dim # May not be the same as spec['output_dim']
@@ -83,24 +84,35 @@ class GSModel(nn.Module):
         
         has_feats = feats is not None
         tmp_feats = feats[ids] if has_feats else None
-        all_feats = [self.prep(ids, tmp_feats, layer_idx=0)]
+        all_feats = [(
+            self.prep(ids, tmp_feats, layer_idx=0),
+            ids
+        )]
         for layer_idx, sampler_fn in enumerate(sample_fns):
             ids = sampler_fn(ids=ids).contiguous().view(-1)
             tmp_feats = feats[ids] if has_feats else None
-            all_feats.append(self.prep(ids, tmp_feats, layer_idx=layer_idx + 1))
+            all_feats.append((
+                self.prep(ids, tmp_feats, layer_idx=layer_idx + 1),
+                ids,
+            ))
         
         # Sequentially apply layers, per original (little weird, IMO)
         # Each iteration reduces length of array by one
         for agg_layer in self.agg_layers.children():
             all_feats = [
-                agg_layer(
-                    node_feats=all_feats[k],
-                    neib_feats=all_feats[k + 1],
-                ) for k in range(len(all_feats) - 1)]
+                (
+                    agg_layer(
+                        node_feats=all_feats[i][0],
+                        neib_feats=all_feats[i + 1][0],
+                        node_ids=all_feats[i][1],
+                        neib_ids=all_feats[i + 1][1],
+                    ),
+                    all_feats[i][1]
+                ) for i in range(len(all_feats) - 1)]
         
         assert len(all_feats) == 1, "len(all_feats) != 1"
         
-        out = F.normalize(all_feats[0], dim=1) # ?? Do we actually want this? ... Sometimes ...
+        out = F.normalize(all_feats[0][0], dim=1) # ?? Do we actually want this? ... Sometimes ...
         out = self.fc(out)
         if normalize_out:
             out = F.normalize(out, dim=1)
