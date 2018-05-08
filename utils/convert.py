@@ -56,6 +56,10 @@ def save_problem(problem, outpath):
     assert validate_problem(problem)
     assert not os.path.exists(outpath), 'save_problem: %s already exists' % outpath
     
+    if 'sparse' in problem and problem['sparse']:
+        problem['adj'] = spadj2edgelist(problem['adj'])
+        problem['train_adj'] = spadj2edgelist(problem['train_adj'])
+    
     f = h5py.File(outpath)
     for k,v in problem.items():
         if v is not None:
@@ -212,8 +216,8 @@ if __name__ == "__main__":
     #     "n_classes" : n_classes,
         
     #     "sparse"    : True,
-    #     "adj"       : spadj2edgelist(adj),
-    #     "train_adj" : spadj2edgelist(train_adj),
+    #     "adj"       : adj,
+    #     "train_adj" : train_adj,
         
     #     "feats"     : aug_feats,
     #     "targets"   : aug_targets,
