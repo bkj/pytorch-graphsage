@@ -202,9 +202,9 @@ if __name__ == "__main__":
     # adj = make_sparse_adjacency(G, sel=None) # Adds dummy node
     # train_adj = make_sparse_adjacency(G, sel=(folds == 'train')) # Adds dummy node
 
-    # aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
-    # aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
-    # aug_folds   = np.hstack([['dummy'], folds])
+    aug_feats   = np.vstack([np.zeros((feats.shape[1],)), feats]) # Add feat for dummy node
+    aug_targets = np.vstack([np.zeros((targets.shape[1],), dtype='int64'), targets])
+    aug_folds   = np.hstack([['dummy'], folds])
 
     # print('saving -> %s' % args.outpath, file=sys.stderr)
     # save_problem({
